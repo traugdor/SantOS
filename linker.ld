@@ -1,0 +1,30 @@
+/* Linker script for 64-bit kernel */
+OUTPUT_FORMAT(elf64-x86-64)
+ENTRY(_start)
+
+SECTIONS
+{
+    /* Kernel will be loaded at 2MB */
+    . = 0x200000;
+    
+    .text : ALIGN(4K)
+    {
+        *(.text)
+    }
+    
+    .rodata : ALIGN(4K)
+    {
+        *(.rodata)
+    }
+    
+    .data : ALIGN(4K)
+    {
+        *(.data)
+    }
+    
+    .bss : ALIGN(4K)
+    {
+        *(COMMON)
+        *(.bss)
+    }
+}

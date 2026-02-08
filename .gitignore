@@ -1,0 +1,22 @@
+# Object files
+*.o
+*.bin
+
+# Disk and image files
+*.img
+imgdump
+elfdump
+hexdump
+
+# Build artifacts
+bootloader.img
+disk.img
+
+# Kernel binary
+kernel.elf
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*~
