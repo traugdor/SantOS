@@ -1,7 +1,16 @@
 [bits 16]
-[org 0x8000]
+%ifidn __OUTPUT_FORMAT__, elf64
+    ; ELF-specific code (no ORG needed)
+%else
+    org 0x8000  ; Binary output format
+%endif
 
 start:
+    ; Set up stack for boot2
+    xor ax, ax
+    mov ss, ax
+    mov sp, 0x8000
+    
     cli                     ; Disable interrupts
     
     ; Check for CPUID support
@@ -22,6 +31,11 @@ start:
     call print_string_16
     call delay_16
     
+    ; Load kernel from disk using BIOS INT 0x13 (after page tables, before protected mode)
+    sti                     ; Re-enable interrupts for BIOS calls
+    call load_kernel_16
+    cli                     ; Disable interrupts again
+    
     ; Load GDT
     lgdt [gdt_descriptor]
     
@@ -36,6 +50,12 @@ start:
 
     ; Far jump to 32-bit protected mode
     jmp CODE_SEG_32:init_pm
+    jmp $
+
+.kernel_load_failed:
+    mov si, msg_kernel_load_failed
+    call print_string_16
+    jmp $
 
 ; Check if CPUID is supported
 check_cpuid:
@@ -134,12 +154,309 @@ setup_page_tables:
     
     ret
 
-; Error messages
+; Load kernel from disk using BIOS INT 0x13
+load_kernel_16:
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+    push ds
+    
+    ; Reset disk controller
+    mov ah, 0
+    mov dl, 0           ; Drive 0 (floppy)
+    int 0x13
+    
+; Load root directory (sectors 19-32, 14 sectors)
+    mov ax, 0x09C0
+    mov es, ax
+    xor bx, bx
+
+    mov ah, 0x02           ; Read sectors
+    mov al, 14             ; Read 14 sectors (root directory)
+    mov ch, 0              ; Cylinder 0
+    mov dh, 1              ; Head 1
+    mov cl, 2              ; Sector 2 (first sector of root directory)
+    int 0x13
+    jc .disk_error
+
+; Search for "BOOT2  BIN" in root directory
+    mov di, 0              ; Include volume label
+    mov cx, 224            ; Max root entries (14 sectors * 16 entries/sector)
+
+.search_loop:
+    cmp byte [es:di], 0    ; End of directory
+    je .kernel_not_found
+    mov si, filename_kernel ; "KERNEL  ELF"
+    mov cx, 11             ; Filename length
+    push di
+    repe cmpsb
+    pop di
+    je .found_kernel
+    add di, 32             ; Next directory entry (32 bytes per entry)
+    jmp .search_loop
+    
+.found_kernel:
+    ; Debug: print 'K' for kernel found
+    mov ah, 0x0E
+    mov al, 'K'
+    int 0x10
+    
+    ; Read kernel - calculate total sectors needed
+    mov ax, [es:di + 28] ; File size in bytes
+    add ax, 511
+    mov cx, 512
+    xor dx, dx
+    div cx               ; ax = total sectors
+    mov cx, ax           ; CX = total sectors to read (use CX instead of BP)
+    
+    ; Debug: print total sectors as hex
+    call print_hex_word  ; Print AX as 4 hex digits
+    
+    ; Get first sector from directory entry
+    mov ax, [es:di + 26] ; First sector
+    sub ax, 2
+    add ax, 33          ; LBA = (sector - 2) + 33
+    mov si, ax          ; SI = current LBA
+    
+    ; Debug: print 'L' and LBA
+    mov ah, 0x0E
+    mov al, 'L'
+    int 0x10
+    mov ax, si
+    call print_hex_word
+    
+    ; Load kernel to 0x1000:0x0000 (physical address 0x10000) like FAT16 version
+    mov ax, 0x1000
+    mov es, ax
+    xor bx, bx         ; BX = buffer offset (0x0000)
+    
+    ; Save ES before BIOS call (BIOS might clobber it)
+    push es
+    
+    ; Reset DS to 0 for BIOS call
+    xor ax, ax
+    mov ds, ax
+
+    ; Read kernel respecting track boundaries
+    mov ax, 0x1000
+    mov es, ax
+    xor bx, bx         ; BX = buffer offset
+    
+    ; CX contains total sectors to read
+.read_kernel_loop:
+    cmp cx, 0           ; Check if all sectors read
+    je .kernel_read_ok
+    
+    ; Debug: print 'R' for read loop iteration
+    mov ah, 0x0E
+    mov al, 'R'
+    int 0x10
+    
+    ; Convert current LBA to CHS
+    mov ax, si          ; Current LBA
+    xor dx, dx
+    mov cx, 18
+    div cx              ; ax = track, dx = sector within track (0-based)
+    
+    ; Save sector and track
+    mov cl, dl          ; CL = sector within track (0-based)
+    inc cl              ; CL = Sector (1-based for BIOS)
+    mov bx, ax          ; BX = track
+    
+    ; Debug: print current LBA
+    mov ax, si
+    call print_hex_word
+    mov ax, bx          ; AX = track (restore)
+    
+    xor dx, dx
+    mov cx, 2
+    div cx              ; ax = cylinder, dx = head
+    
+    mov ch, al          ; Cylinder
+    mov dh, dl          ; Head
+    
+    ; CL still has the sector value from before
+    ; (CL wasn't modified by the second division since we used CX=2)
+    
+    ; Debug: print CHS (C:H:S)
+    mov ah, 0x0E
+    mov al, ':'
+    int 0x10
+    mov al, ch          ; Cylinder
+    call print_hex_byte
+    mov al, ':'
+    int 0x10
+    mov al, dh          ; Head
+    call print_hex_byte
+    mov al, ':'
+    int 0x10
+    mov al, cl          ; Sector
+    call print_hex_byte
+    
+    ; Calculate sectors remaining on this track
+    ; Remaining = 18 - sector + 1 (sectors are 1-based)
+    ; so if we're at sector 2, we can read 17 sectors (2-18)
+    mov al, 19
+    sub al, cl          ; AL = sectors remaining on track (19 - sector)
+    
+    ; Read min(remaining_on_track, sectors_needed)
+    cmp al, cl          ; Compare remaining on track with sectors needed (CL = low byte of CX)
+    jle .read_track_end ; If remaining on track <= needed, read to end of track
+    
+    ; Otherwise read only what's needed
+    mov al, cl
+    
+.read_track_end:
+    ; AL = sectors to read
+    mov bl, al          ; Save in BL
+    
+    ; Debug: print sectors to read
+    mov ah, 0x0E
+    mov al, '='
+    int 0x10
+    mov al, bl
+    call print_hex_byte
+    
+    pop es              ; Restore ES
+    
+    ; Debug: print registers before INT 0x13
+    mov ah, 0x0E
+    mov al, '['
+    int 0x10
+    mov al, ch          ; Cylinder
+    call print_hex_byte
+    mov al, dh          ; Head
+    call print_hex_byte
+    mov al, cl          ; Sector
+    call print_hex_byte
+    mov al, ']'
+    int 0x10
+    
+    mov ah, 0x02        ; Read sectors command
+    mov al, bl          ; Sector count
+    mov dl, 0           ; Drive 0
+    
+    int 0x13
+    jc .kernel_read_error_debug
+    
+    ; Debug: print 'S' for successful read
+    mov ah, 0x0E
+    mov al, 'S'
+    int 0x10
+    
+    ; Update counters
+    movzx ax, bl        ; AX = sectors we requested (from BL)
+    sub cx, ax          ; Decrease remaining sectors in CX
+    add si, ax          ; Increase LBA
+    
+    ; Update buffer address
+    mov ax, 0x200
+    mul al              ; AX = bytes read
+    add bx, ax
+    
+    ; Check for 64KB boundary crossing
+    cmp bx, 0xFFFF
+    jle .read_kernel_loop
+    
+    ; Wrap to next segment
+    mov ax, es
+    add ax, 0x1000      ; Add 64KB
+    mov es, ax
+    xor bx, bx
+    
+    jmp .read_kernel_loop
+
+.kernel_read_ok:
+    
+    ; Verify kernel was loaded correctly (check ELF magic)
+    mov ax, 0x1000
+    mov es, ax
+    xor bx, bx
+    mov ax, [es:bx]         ; Read from ES:BX
+    
+    ; Check for ELF magic
+    cmp ax, 0x457F          ; Check first 2 bytes of "\x7FELF"
+    jne .kernel_load_failed
+    
+    pop ds
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+.root_dir_read_error:
+    mov ah, 0x0E
+    mov al, 'R'
+    int 0x10
+    jmp $
+
+.kernel_not_found:
+    mov ah, 0x0E
+    mov al, 'N'
+    int 0x10
+    jmp $
+
+.kernel_read_error_debug:
+    ; Print error code in AH
+    mov ah, 0x0E
+    mov al, 'E'
+    int 0x10
+    
+    ; Print error code as hex
+    mov al, ah          ; AH has error code from INT 0x13
+    shr al, 4
+    cmp al, 10
+    jl .error_digit_0_9
+    add al, 'A' - 10
+    jmp .error_print_digit
+.error_digit_0_9:
+    add al, '0'
+.error_print_digit:
+    mov ah, 0x0E
+    int 0x10
+    jmp $
+
+.kernel_read_error:
+    mov ah, 0x0E
+    mov al, 'E'
+    int 0x10
+    jmp $
+
+.kernel_load_failed:
+    mov ah, 0x0E
+    mov al, 'F'
+    int 0x10
+    jmp $
+
+.disk_error:
+    push si
+    mov si, msg_disk_error
+    call print_string_16
+    pop si
+    jmp $
+
+; Data storage
+kernel_sectors_remaining db 0
+
+; Messages
 error_no_cpuid db 'ERROR: CPUID not supported', 0
 error_no_long_mode db 0x0D, 0x0A, 'ERROR: Long mode not supported', 0
-msg_checks_ok db 0x0D, 0x0A, 'CPU checks passed, entering long mode...', 0x0D, 0x0A, 0
-msg_page_tables_ok db 'Page tables setup complete', 0x0D, 0x0A, 0
-msg_entering_pm db 'Entering protected mode...', 0x0D, 0x0A, 0
+msg_checks_ok db 0x0D, 0x0A, 'CPU checks passed', 0x0D, 0x0A, 0
+msg_page_tables_ok db 'Page tables OK', 0x0D, 0x0A, 0
+msg_entering_pm db 'Entering PM', 0x0D, 0x0A, 0
+msg_entering_64bit db 'Entering 64-bit', 0x0D, 0x0A, 0
+msg_kernel_load_failed db 'Kernel load failed', 0
+msg_kernel_entry db 'Kernel entry: 0x', 0
+filename_kernel db 'KERNEL  ELF', 0
+
 
 [bits 32]
 init_pm:
@@ -157,7 +474,7 @@ init_pm:
     or eax, 1 << 5          ; Set PAE bit
     mov cr4, eax
     
-    ; Load CR3 with page table address (must be done after PAE is enabled)
+    ; Load CR3 with page table address
     mov eax, 0x1000
     mov cr3, eax
     
@@ -188,7 +505,7 @@ long_mode_start:
     mov gs, ax
     mov ss, ax
     
-    ; Display initial message
+    ; Clear the screen
     call clear_screen
     
     ; Display welcome message
@@ -197,77 +514,94 @@ long_mode_start:
     mov ah, 0x0F            ; Text attribute: white on black
     call print_string_pm
     
-    ; Display success message on second line
-    mov rdi, 0xB8000 + 160  ; Move to second line
-    mov rsi, msg_success
-    mov ah, 0x0A            ; Light green on black
-    call print_string_pm
-    
     ; Display loading kernel message
-    mov rdi, 0xB8000 + 320  ; Third line
+    mov rdi, 0xB8000 + 160  ; Second line
     mov rsi, msg_loading_kernel
     mov ah, 0x0F
     call print_string_pm
-    
-    ; Simple kernel copy - just copy everything from ELF to 0x200000
-    ; ELF is at 0x10000, kernel code starts at offset 0x1000 in ELF
-    ; Copy 32KB to be safe (kernel is ~10KB)
-    mov rsi, 0x11000        ; Source: ELF base + 0x1000 offset
-    mov rdi, 0x200000       ; Destination: kernel load address
-    mov rcx, 0x8000         ; Copy 32KB
-    rep movsb
-    
-    ; Set entry point
-    mov qword [kernel_entry], 0x200000
-    
-    ; Debug: Show we got past load_kernel
-    mov rdi, 0xB8000 + 480
-    mov rsi, msg_kernel_loaded
-    mov ah, 0x0A
-    call print_string_pm
-    
-    ; Display jumping to kernel message
-    mov rdi, 0xB8000 + 480  ; Fourth line
-    mov rsi, msg_jumping_kernel
-    mov ah, 0x0E            ; Yellow on black
-    call print_string_pm
-    
-    ; Debug: Show entry point
-    mov rax, [kernel_entry]
-    mov rdi, 0xB8000 + 800  ; Line 5
+
+    ; Kernel is already loaded at 0x10000 by boot2 in 16-bit mode
+    ; Just verify the ELF magic number
+    mov rax, [0x10000]
+    mov rdi, 0xB8000 + 320  ; Third line
     call print_hex
     
-    ; Small delay so we can see the entry point
-    mov rcx, 0x10000000
-.delay:
+    ; Check ELF magic number
+    cmp dword [0x10000], 0x464C457F  ; "\x7FELF"
+    jne .elf_error
+    
+    ; Get entry point from ELF header
+    mov rax, [0x10018]      ; e_entry field in ELF64 header
+    mov [kernel_entry], rax
+    
+    ; Debug: Display kernel entry point
+    mov rdi, 0xB8000 + 480  ; Fourth line
+    mov rsi, msg_kernel_entry
+    call print_string_pm
+    mov rax, [kernel_entry]
+    mov rdi, 0xB8000 + 480 + 40
+    call print_hex
+    
+    ; Get program header info
+    movzx rcx, word [0x10038]  ; e_phnum
+    mov rsi, [0x10020]         ; e_phoff
+    add rsi, 0x10000           ; Add base address to get program header location
+    
+    ; Loop through program headers
+.load_segments:
+    ; Check if this is a loadable segment (p_type = 1)
+    cmp dword [rsi], 1
+    jne .next_segment
+    
+    ; Debug: Show segment info
+    push rsi
+    mov rdi, 0xB8000 + 480  ; Fourth line
+    mov rax, [rsi + 0x10]   ; p_paddr
+    call print_hex
+    pop rsi
+    
+    ; Load segment into memory
+    mov rdi, [rsi + 0x10]   ; p_paddr (physical address)
+    mov rcx, [rsi + 0x28]   ; p_filesz
+    mov rdx, [rsi + 0x08]   ; p_offset
+    add rdx, 0x10000        ; Add base address
+    push rsi
+    mov rsi, rdx
+    rep movsb
+    pop rsi
+    
+.next_segment:
+    add rsi, 0x38           ; Move to next program header (size = 0x38)
     dec rcx
-    jnz .delay
+    jnz .load_segments
     
     ; Set up stack for kernel (16KB stack at 0x80000)
     mov rsp, 0x80000
     
-    ; Debug: Show we set up stack
-    mov rdi, 0xB8000 + 960  ; Line 6
-    mov al, 'S'
-    mov ah, 0x0C            ; Red
-    stosw
+    ; Debug: Show we're about to jump to kernel
+    mov rdi, 0xB8000 + 640  ; Fifth line
+    mov rsi, msg_jumping_kernel
+    mov ah, 0x0A
+    call print_string_pm
     
-    ; Debug: Show first 4 bytes at kernel entry
-    mov rax, [kernel_entry]
-    mov rbx, [rax]          ; Read first 4 bytes of kernel
-    mov rax, rbx
-    mov rdi, 0xB8000 + 1280  ; Line 8
-    call print_hex
+    ; Small delay to see the message
+    mov rcx, 0x1000000
+.delay:
+    dec rcx
+    jnz .delay
     
     ; Jump to kernel entry point
     mov rax, [kernel_entry]
-    call rax
-    
-    ; If kernel returns, halt
-    cli
-.halt_loop:
+    jmp rax
+
+.elf_error:
+    ; Display error message
+    mov rdi, 0xB8000 + 480
+    mov rsi, msg_elf_error
+    mov ah, 0x4C            ; Red on black
+    call print_string_pm
     hlt
-    jmp .halt_loop
+    jmp $
 
 ; Clear the screen (fills with spaces)
 clear_screen:
@@ -325,207 +659,6 @@ delay_64:
     pop rcx
     ret
 
-; Load kernel from disk and parse ELF
-load_kernel:
-    ; Debug: Show we entered load_kernel
-    push rdi
-    push rsi
-    push rax
-    mov rdi, 0xB8000 + 640
-    mov rsi, msg_in_load_kernel
-    mov ah, 0x0C
-    call print_string_pm
-    pop rax
-    pop rsi
-    pop rdi
-    
-    ; Kernel was already loaded by boot.asm to 0x10000
-    
-    ; Parse ELF header
-    mov r15, 0x10000        ; R15 = ELF base address (preserve this!)
-    
-    ; Check ELF magic number (0x7F 'E' 'L' 'F')
-    mov eax, [r15]
-    cmp eax, 0x464C457F
-    jne .elf_error
-    
-    ; Get entry point from ELF header (offset 0x18 for 64-bit ELF)
-    mov rax, [r15 + 0x18]
-    mov [kernel_entry], rax
-    
-    ; Get program header offset (offset 0x20)
-    mov rax, [r15 + 0x20]
-    add rax, r15            ; RAX = program header table address
-    
-    ; Get program header entry count (offset 0x38, 2 bytes)
-    movzx rcx, word [r15 + 0x38]
-    
-    ; Get program header entry size (offset 0x36, 2 bytes)
-    movzx rdx, word [r15 + 0x36]
-    
-    ; Save segment count for debugging
-    mov [segment_count], rcx
-    
-    ; Debug: Show segment count
-    push rax
-    push rcx
-    push rdx
-    mov rdi, 0xB8000 + 640
-    mov al, '0'
-    add al, cl          ; Convert count to ASCII (assumes < 10)
-    mov ah, 0x0B        ; Cyan
-    stosw
-    pop rdx
-    pop rcx
-    pop rax
-    
-    ; Initialize loaded segment counter
-    mov qword [segments_loaded], 0
-    
-.load_segments:
-    test rcx, rcx
-    jz .done
-    
-    ; Check if this is a LOAD segment (p_type == 1)
-    cmp dword [rax], 1
-    jne .next_segment
-    
-    ; Increment loaded counter
-    inc qword [segments_loaded]
-    
-    ; Debug: Show we're loading a segment (append to screen)
-    push rax
-    push rcx
-    push rdx
-    push rdi
-    mov rdi, 0xB8000 + 640
-    mov rax, [segments_loaded]
-    shl rax, 1              ; Multiply by 2 (each char is 2 bytes)
-    add rdi, rax            ; Offset by segment count
-    mov al, '*'
-    mov ah, 0x0E
-    stosw
-    pop rdi
-    pop rdx
-    pop rcx
-    pop rax
-    
-    ; Get segment info
-    mov rbx, [rax + 0x10]   ; p_offset - offset in file
-    add rbx, r15            ; RBX = source address (ELF base + offset)
-    mov rdi, [rax + 0x18]   ; p_vaddr - virtual address (destination)
-    mov r8, [rax + 0x20]    ; p_filesz - size in file
-    mov r9, [rax + 0x28]    ; p_memsz - size in memory
-    
-    ; Debug: Show destination and source of first segment only
-    cmp qword [segments_loaded], 1
-    jne .skip_debug
-    push rax
-    push rdi
-    push rbx
-    
-    ; Show destination
-    mov rax, rdi
-    mov rdi, 0xB8000 + 1120  ; Line 7
-    call print_hex
-    
-    ; Show source
-    pop rbx
-    push rbx
-    mov rax, rbx
-    mov rdi, 0xB8000 + 1280  ; Line 8
-    call print_hex
-    
-    pop rbx
-    pop rdi
-    pop rax
-.skip_debug:
-    
-    ; Save destination for debugging (last segment)
-    mov [last_segment_dest], rdi
-    mov [last_segment_size], r8
-    
-    ; Verify source and destination are valid
-    test r8, r8             ; Check if size is non-zero
-    jz .next_segment
-    
-    ; Copy segment to destination
-    ; RDI already contains destination address from line 353
-    ; RBX contains source address
-    ; R8 contains size
-    
-    ; Save copy parameters for verification
-    mov [debug_src], rbx
-    mov [debug_dst], rdi  
-    mov [debug_size], r8
-    
-    ; Save registers that will be modified
-    push rax
-    push rcx
-    push rdx
-    push rsi
-    
-    mov rcx, r8             ; Count
-    mov rsi, rbx            ; Source
-    ; RDI already has destination!
-    
-    rep movsb               ; Copy bytes (modifies RSI, RDI, RCX)
-    
-    ; TODO: Zero out BSS - skipping for now as 4MB takes too long
-    ; Zero out BSS (MemSiz - FileSiz)
-    ; RDI now points right after copied data
-    ; mov rcx, r9             ; MemSiz
-    ; sub rcx, r8             ; MemSiz - FileSiz = BSS size
-    ; jz .no_bss              ; Skip if no BSS
-    ; xor al, al              ; Zero byte
-    ; rep stosb               ; Zero out BSS
-    
-.no_bss:
-    ; Restore registers
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rax
-    
-.next_segment:
-    add rax, rdx            ; Move to next program header
-    dec rcx
-    jmp .load_segments
-    
-.done:
-    ret
-
-.elf_error:
-    mov rdi, 0xB8000 + 320
-    mov rsi, msg_elf_error
-    mov ah, 0x0C            ; Light red on black
-    call print_string_pm
-    cli
-    hlt
-
-; Read sectors from disk using LBA
-; RAX = starting LBA sector
-; RBX = destination address
-; RCX = number of sectors
-read_disk_lba:
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    
-    ; We need to use BIOS interrupts, but we're in long mode
-    ; For simplicity, we'll assume the kernel was already loaded by boot.asm
-    ; In a real implementation, you'd need to either:
-    ; 1. Use ATA PIO mode directly (no BIOS)
-    ; 2. Load everything in boot.asm before switching modes
-    
-    ; For now, just return (kernel should be loaded by updated boot.asm)
-    
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-    ret
 
 ; Data
 msg db 'Hello, World from 64-bit long mode!', 0
@@ -541,6 +674,49 @@ msg_copy_src db 'Copy src: ', 0
 msg_copy_dst db 'Copy dst: ', 0
 msg_code_check db 'Code at entry: ', 0
 msg_elf_error db 'ERROR: Invalid ELF file!', 0
+msg_disk_error db 'DISK ERR: 0x', 0
+msg_reading_disk db 'Reading disk...', 0
+msg_read_ok db 'Read OK', 0
+msg_in_read_disk db 'In read_disk', 0
+; Helper functions for debug output
+print_hex_word:
+    ; Print AX as 4 hex digits
+    push ax
+    mov al, ah
+    call print_hex_byte
+    pop ax
+    call print_hex_byte
+    ret
+
+print_hex_byte:
+    ; Print AL as 2 hex digits
+    push ax
+    shr al, 4
+    call print_hex_digit
+    pop ax
+    and al, 0x0F
+    call print_hex_digit
+    ret
+
+print_hex_digit:
+    ; Print AL (0-15) as single hex digit
+    cmp al, 10
+    jl .digit_0_9
+    add al, 'A' - 10
+    jmp .digit_print
+.digit_0_9:
+    add al, '0'
+.digit_print:
+    mov ah, 0x0E
+    int 0x10
+    ret
+
+msg_timeout db 'DISK TIMEOUT', 0
+msg_disk_init_timeout db 'DISK INIT TIMEOUT', 0
+msg_fdc_timeout db 'FDC TIMEOUT', 0
+msg_fdc_ready db 'FDC READY', 0
+msg_fdc_init db 'FDC INIT', 0
+msg_fdc_not_ready db 'FDC NOT READY', 0
 
 kernel_entry dq 0       ; Kernel entry point address
 segment_count dq 0
@@ -579,7 +755,7 @@ gdt_end:
 
 gdt_descriptor:
     dw gdt_end - gdt_start - 1 ; GDT size - 1
-    dd gdt_start              ; GDT base address
+    dd gdt_start               ; GDT base address
 
 CODE_SEG_32 equ gdt_code_32 - gdt_start
 DATA_SEG_32 equ gdt_data_32 - gdt_start

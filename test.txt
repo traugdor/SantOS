@@ -1,3 +1,3 @@
 Hello from SantOS filesystem!
-This file was read from the FAT16 disk.
+This file was read from the FAT12 disk.
 If you can see this, the filesystem driver works!

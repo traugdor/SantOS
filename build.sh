@@ -3,15 +3,35 @@
 
 echo "Building bootloader..."
 
-# Assemble boot.asm (first stage bootloader)
-nasm -f bin boot.asm -o boot.bin
+# For boot.asm (first stage)
+nasm -f elf64 -g -F dwarf -o boot12.elf.o boot12.asm
+x86_64-elf-ld -Ttext=0x7C00 -nostdlib -o boot12.elf boot12.elf.o
+objcopy -O binary boot12.elf boot12.bin
 if [ $? -ne 0 ]; then
-    echo "Error assembling boot.asm"
+    echo "Error assembling boot12.asm"
     exit 1
 fi
 
-# Assemble boot2.asm (second stage bootloader)
-nasm -f bin boot2.asm -o boot2.bin
+nasm -f elf64 -g -F dwarf -o boot16.elf.o boot16.asm
+x86_64-elf-ld -Ttext=0x7C00 -nostdlib -o boot16.elf boot16.elf.o
+objcopy -O binary boot16.elf boot16.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling boot16.asm"
+    #exit 1
+fi
+
+nasm -f elf64 -g -F dwarf -o boot32.elf.o boot32.asm
+x86_64-elf-ld -Ttext=0x7C00 -nostdlib -o boot32.elf boot32.elf.o
+objcopy -O binary boot32.elf boot32.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling boot32.asm"
+    #exit 1
+fi
+
+# For boot2.asm (second stage)
+nasm -f elf64 -g -F dwarf -o boot2.elf.o boot2.asm
+x86_64-elf-ld -Ttext=0x8000 -nostdlib -o boot2.elf boot2.elf.o
+objcopy -O binary boot2.elf boot2.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling boot2.asm"
     exit 1
@@ -85,31 +105,6 @@ echo "After padding:"
 echo "  - boot.bin: $(stat -c%s boot.bin) bytes"
 echo "  - boot2.bin: $(stat -c%s boot2.bin) bytes"
 
-# Create disk image - bootloader is now exactly 2560 bytes (5 sectors)
-cat boot.bin boot2.bin > bootloader.img
-
-# Verify bootloader size
-BOOTLOADER_SIZE=$(stat -c%s bootloader.img)
-echo "  - bootloader.img: $BOOTLOADER_SIZE bytes (should be 2560)"
-
-if [ $BOOTLOADER_SIZE -ne 2560 ]; then
-    echo "ERROR: Bootloader is not exactly 2560 bytes!"
-    exit 1
-fi
-
-# Append kernel (starting at sector 6)
-cat kernel.elf >> bootloader.img
-
-# Pad to at least 64KB
-truncate -s 65536 bootloader.img
-
-hexdump -C bootloader.img | head -n 170 > hexdump
-readelf -l kernel.elf > elfdump
-
-echo "Build complete! bootloader.img created."
-echo "Hexdump output saved to hexdump file"
-echo "readelf output saved to elfdump file"
-echo "  - kernel.elf size: $(stat -c%s kernel.elf) bytes"
-echo ""
+echo "Build complete!"
 echo "To run in QEMU, use:"
-echo "qemu-system-x86_64 -drive format=raw,file=bootloader.img"
+echo "./create_disk.sh && qemu-system-x86_64 -drive format=raw,if=floppy,file=disk.img"

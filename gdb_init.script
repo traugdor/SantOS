@@ -1,0 +1,23 @@
+# GDB initialization script for SantOS bootloader debugging
+# This script connects to QEMU and loads debug symbols
+
+# Connect to QEMU GDB server on localhost:1234
+target remote localhost:1234
+
+# Load boot12 symbols
+symbol-file boot12.elf
+
+# Load boot2 symbols
+add-symbol-file boot2.elf 0x8000
+
+# Set architecture to i386:x86-64 for proper disassembly
+set architecture i386:x86-64
+
+# Set disassembly flavor to Intel syntax
+set disassembly-flavor intel
+
+# Break at the start of boot12
+break *0x7C00
+
+# Continue execution until first breakpoint
+continue
