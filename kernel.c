@@ -8,8 +8,8 @@
 #include "include/idt.h"
 #include "include/timer.h"
 #include "include/keyboard.h"
-#include "include/ata.h"
-#include "include/fat16.h"
+#include "include/fdc.h"
+#include "include/fat12.h"
 
 void kernel_main(void) {
     // Initialize VGA driver
@@ -24,28 +24,26 @@ void kernel_main(void) {
     keyboard_init();
     printf("Keyboard ready!\n\n");
     
-    // Initialize ATA driver
-    printf("Initializing ATA driver...\n");
-    ata_init();
-    printf("ATA driver ready!\n\n");
+    // Initialize FDC (Floppy Disk Controller)
+    fdc_init();
     
-    // Initialize FAT16 filesystem
-    printf("Initializing FAT16 filesystem...\n");
-    if (fat16_init() == 0) {
-        printf("FAT16 initialized successfully!\n\n");
+    // Initialize FAT12 filesystem
+    printf("Initializing FAT12 filesystem...\n");
+    if (fat12_init() == 0) {
+        printf("FAT12 initialized successfully!\n\n");
         
-        // Try to read TEST.TXT using FAT16 driver
+        // Try to read TEST.TXT using FAT12 driver
         printf("Attempting to read TEST.TXT...\n");
-        fat16_file_t file;
+        fat12_file_t file;
         
-        if (fat16_open("TEST.TXT", &file) == 0) {
+        if (fat12_open("TEST.TXT", &file) == 0) {
             printf("Successfully opened TEST.TXT (%d bytes)\n", file.size);
             printf("File contents:\n");
             printf("---\n");
             
             // Read and print file contents
             uint8_t buffer[512];
-            int bytes_read = fat16_read(&file, buffer, sizeof(buffer));
+            int bytes_read = fat12_read(&file, buffer, sizeof(buffer));
             
             if (bytes_read > 0) {
                 for (int i = 0; i < bytes_read; i++) {
@@ -58,7 +56,7 @@ void kernel_main(void) {
             printf("Failed to open TEST.TXT\n\n");
         }
     } else {
-        printf("FAT16 initialization failed!\n\n");
+        printf("FAT12 initialization failed!\n\n");
     }
     
     // Halt

@@ -37,6 +37,19 @@ BOOT2_BIN = boot2.bin
 BOOT2_ELF = boot2.elf
 BOOT2_OBJ = boot2.elf.o
 
+# FAT Drivers
+FAT12_BIN = fat12.bin
+FAT12_ELF = fat12.elf
+FAT12_OBJ = fat12.elf.o
+
+FAT16_BIN = fat16.bin
+FAT16_ELF = fat16.elf
+FAT16_OBJ = fat16.elf.o
+
+FAT32_BIN = fat32.bin
+FAT32_ELF = fat32.elf
+FAT32_OBJ = fat32.elf.o
+
 # Output
 KERNEL_ELF = kernel.elf
 DISK_IMG = disk.img
@@ -51,8 +64,8 @@ build: bootloader stage2 kernel
 bootloader: $(BOOT12_BIN) $(BOOT16_BIN) $(BOOT32_BIN)
 	@echo "✓ Bootloader built successfully"
 
-stage2: $(BOOT2_BIN)
-	@echo "✓ Stage 2 bootloader built successfully"
+stage2: $(BOOT2_BIN) $(FAT12_BIN) $(FAT16_BIN) $(FAT32_BIN)
+	@echo "✓ Stage 2 bootloader and FAT drivers built successfully"
 
 kernel: $(KERNEL_ELF)
 	@echo "✓ Kernel built successfully"
@@ -114,6 +127,45 @@ $(BOOT2_BIN): $(BOOT2_ELF)
 	@echo "Converting boot2.elf to binary..."
 	$(OBJCOPY) -O binary $< $@
 
+# FAT12 Driver
+$(FAT12_OBJ): fat12.asm
+	@echo "Assembling fat12.asm..."
+	$(NASM) $(NASMFLAGS) -o $@ $<
+
+$(FAT12_ELF): $(FAT12_OBJ)
+	@echo "Linking fat12.elf..."
+	$(LD) -Ttext=0x7E00 -nostdlib -o $@ $<
+
+$(FAT12_BIN): $(FAT12_ELF)
+	@echo "Converting fat12.elf to binary..."
+	$(OBJCOPY) -O binary $< $@
+
+# FAT16 Driver
+$(FAT16_OBJ): fat16.asm
+	@echo "Assembling fat16.asm..."
+	$(NASM) $(NASMFLAGS) -o $@ $<
+
+$(FAT16_ELF): $(FAT16_OBJ)
+	@echo "Linking fat16.elf..."
+	$(LD) -Ttext=0x7E00 -nostdlib -o $@ $<
+
+$(FAT16_BIN): $(FAT16_ELF)
+	@echo "Converting fat16.elf to binary..."
+	$(OBJCOPY) -O binary $< $@
+
+# FAT32 Driver
+$(FAT32_OBJ): fat32.asm
+	@echo "Assembling fat32.asm..."
+	$(NASM) $(NASMFLAGS) -o $@ $<
+
+$(FAT32_ELF): $(FAT32_OBJ)
+	@echo "Linking fat32.elf..."
+	$(LD) -Ttext=0x7E00 -nostdlib -o $@ $<
+
+$(FAT32_BIN): $(FAT32_ELF)
+	@echo "Converting fat32.elf to binary..."
+	$(OBJCOPY) -O binary $< $@
+
 # Assembly objects (64-bit ELF for kernel)
 %.o: %.asm
 	@echo "Assembling $<..."
@@ -150,6 +202,9 @@ clean:
 	rm -f $(BOOT16_OBJ) $(BOOT16_ELF) $(BOOT16_BIN)
 	rm -f $(BOOT32_OBJ) $(BOOT32_ELF) $(BOOT32_BIN)
 	rm -f $(BOOT2_OBJ) $(BOOT2_ELF) $(BOOT2_BIN)
+	rm -f $(FAT12_OBJ) $(FAT12_ELF) $(FAT12_BIN)
+	rm -f $(FAT16_OBJ) $(FAT16_ELF) $(FAT16_BIN)
+	rm -f $(FAT32_OBJ) $(FAT32_ELF) $(FAT32_BIN)
 	rm -f $(C_OBJECTS) $(ASM_OBJECTS) $(KERNEL_ELF)
 	rm -f $(DISK_IMG)
 	rm -f *.o

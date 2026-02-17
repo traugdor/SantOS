@@ -41,14 +41,18 @@ static inline void outw(uint16_t port, uint16_t value) {
     __asm__ volatile("outw %0, %1" : : "a"(value), "Nd"(port));
 }
 
-// Wait for drive to be ready
-static void ata_wait_ready(void) {
-    while (inb(ATA_PRIMARY_STATUS) & ATA_STATUS_BSY);
+// Wait for drive to be ready (with timeout)
+static int ata_wait_ready(void) {
+    uint32_t timeout = 100000;
+    while ((inb(ATA_PRIMARY_STATUS) & ATA_STATUS_BSY) && timeout--);
+    return timeout > 0 ? 0 : -1;
 }
 
-// Wait for data to be ready
-static void ata_wait_drq(void) {
-    while (!(inb(ATA_PRIMARY_STATUS) & ATA_STATUS_DRQ));
+// Wait for data to be ready (with timeout)
+static int ata_wait_drq(void) {
+    uint32_t timeout = 100000;
+    while (!(inb(ATA_PRIMARY_STATUS) & ATA_STATUS_DRQ) && timeout--);
+    return timeout > 0 ? 0 : -1;
 }
 
 // Initialize ATA
@@ -62,7 +66,9 @@ void ata_init(void) {
 int ata_read_sectors(uint32_t lba, uint8_t sector_count, uint8_t* buffer) {
     if (sector_count == 0) return -1;
     
-    ata_wait_ready();
+    if (ata_wait_ready() != 0) {
+        return -1; // Timeout waiting for drive
+    }
     
     // Select drive and set LBA mode
     outb(ATA_PRIMARY_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));
@@ -78,7 +84,9 @@ int ata_read_sectors(uint32_t lba, uint8_t sector_count, uint8_t* buffer) {
     
     // Read data
     for (int i = 0; i < sector_count; i++) {
-        ata_wait_drq();
+        if (ata_wait_drq() != 0) {
+            return -1; // Timeout waiting for data
+        }
         
         // Check for errors
         if (inb(ATA_PRIMARY_STATUS) & ATA_STATUS_ERR) {

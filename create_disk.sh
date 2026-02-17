@@ -15,9 +15,12 @@ echo "Formatting as FAT12..."
 mkfs.vfat -F 12 -n "SANTOS" disk.img
 
 echo "Copying files to FAT12 filesystem..."
-mmd -i disk.img ::/BOOT2
-mcopy -i disk.img boot2.bin ::/BOOT2/
-mcopy -i disk.img kernel.elf ::/KERNEL.ELF
+mmd -i disk.img ::/BOOT
+mmd -i disk.img ::/BIN
+mcopy -i disk.img boot12.bin ::/BOOT/BOOT12.BIN
+mcopy -i disk.img fat12.bin ::/BOOT/FAT12.SYS
+mcopy -i disk.img boot2.bin ::/BOOT/BOOT2.BIN
+mcopy -i disk.img kernel.elf ::/BOOT/KERNEL.ELF
 
 echo "Creating test file..."
 cat > test.txt << 'EOF'
@@ -40,7 +43,7 @@ BPB_TEMP="fat12_bpb.tmp"
 dd if=disk.img of="$BPB_TEMP" bs=1 skip=3 count=59 2>/dev/null
 
 # Write boot.bin to sector 0 (overwrites BPB temporarily)
-dd if=boot.bin of=disk.img conv=notrunc bs=512 count=1 2>/dev/null
+dd if=boot12.bin of=disk.img conv=notrunc bs=512 count=1 2>/dev/null
 
 # Restore the FAT12 BPB (bytes 3-61)
 dd if="$BPB_TEMP" of=disk.img bs=1 seek=3 count=59 conv=notrunc 2>/dev/null

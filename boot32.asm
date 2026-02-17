@@ -5,16 +5,16 @@
 %endif
 [bits 16]
 
-; Jump over BPB (BIOS Parameter Block) - mkfs.vfat will fill bytes 3-61
+; Jump over BPB (BIOS Parameter Block)
 jmp short boot_start
 nop
 
-; FAT16 BIOS Parameter Block (BPB) - bytes 3-61
+; FAT32 BIOS Parameter Block (BPB) - bytes 3-89
 ; These will be filled by mkfs.vfat when formatting the disk
 ; thus they can be ignored here and left empty
 
-; Pad to byte 62 (BPB ends at byte 61, code starts at 62)
-times 62-($-$$) db 0
+; Pad to byte 90 (FAT32 BPB ends at byte 89, code starts at 90)
+times 90-($-$$) db 0
 
 boot_start:
     cli
@@ -55,30 +55,55 @@ reset_disk:
     call enable_a20
 
 ; --------------------
-; Read FAT12.BIN from FAT12 filesystem
+; Read FAT32.SYS from FAT32 filesystem
+; FAT32 has root directory in a cluster chain, not fixed location
+; Root directory cluster is stored in BPB at offset 0x2C
 
-    ; Load BOOT folder contents directly from LBA 33
-    mov ax, 0x0800
-    mov es, ax
+    ; Get root directory cluster from BPB (32-bit value, use only low 16 bits)
+    mov ax, word [0x7C2C]   ; Root directory cluster (low word)
+    ; Ignore high word for simplicity - assume cluster < 65536
+    
+    ; Calculate data area start
+    ; data_start = reserved + (FATs * sectors_per_FAT)
+    mov bx, word [0x7C0E]       ; Reserved sectors
+    mov cx, word [0x7C24]       ; Sectors per FAT (use low word)
+    mov dl, byte [0x7C10]       ; Number of FATs
+    push ax
+    mov al, dl
+    mul cx                      ; AX = FATs * sectors_per_FAT (low word)
+    add bx, ax                  ; BX = data area start LBA
+    pop ax
+    
+    ; Convert cluster to LBA
+    ; LBA = data_start + (cluster - 2) * sectors_per_cluster
+    sub ax, 2                   ; Cluster 2 is first data cluster
+    mov cl, byte [0x7C0D]       ; Sectors per cluster
+    mul cl                      ; AX = cluster offset in sectors
+    add ax, bx                  ; AX = LBA of root directory
+    
+    ; Load root directory to 0x0800:0x0000
+    mov bx, 0x0800
+    mov es, bx
     xor bx, bx
     
-    mov ax, 33              ; LBA of BOOT folder on FAT12 floppy
+    ; Convert LBA (in AX) to CHS
     xor dx, dx
     push bx
-    mov bx, 18
-    div bx
+    mov bx, 18                  ; Sectors per track
+    div bx                      ; AX = track, DX = sector
     pop bx
     mov cx, dx
-    inc cx                  ; Sector
+    inc cx                      ; Sector (1-based)
+    
     cwd
     push bx
-    mov bx, 2
-    div bx
+    mov bx, 2                   ; Number of heads
+    div bx                      ; AX = cylinder, DX = head
     pop bx
-    mov dh, dl              ; Head
+    mov dh, dl                  ; Head
     shl ah, 6
     xchg al, ah
-    or cx, ax               ; Cylinder
+    or cx, ax                   ; Cylinder
     
     mov ah, 0x02
     mov al, 1               ; Read 1 sector
@@ -86,50 +111,69 @@ reset_disk:
     int 0x13
     jc end
     
-    ; Search for FAT12.BIN in BOOT folder
+    ; Search for FAT32.SYS in root directory
     mov di, 0
     mov cx, 16
-.search_fat12:
+.search_fat32:
     cmp byte [es:di], 0
     je end
     mov al, [es:di + 11]
     and al, 0x10
-    jnz .next_fat12
+    jnz .next_fat32
     push di
     push cx
-    mov si, filename_fat12
+    mov si, filename_fat32
     mov cx, 11
     repe cmpsb
     pop cx
     pop di
-    je .found_fat12
-.next_fat12:
+    je .found_fat32
+.next_fat32:
     add di, 32
     dec cx
-    jnz .search_fat12
+    jnz .search_fat32
     jmp end
     
-.found_fat12:
-    ; Load FAT12.BIN to 0x7E00
-    mov ax, [es:di + 26]    ; Get cluster
+.found_fat32:
+    ; Load FAT32.SYS to 0x7E00
+    ; Get starting cluster (use only low word for simplicity)
+    mov ax, [es:di + 26]        ; Low cluster word
+    ; Ignore high cluster word - assume cluster < 65536
+    
+    ; Calculate data area start (same as before)
+    mov bx, word [0x7C0E]       ; Reserved sectors
+    mov cx, word [0x7C24]       ; Sectors per FAT (low word)
+    mov dl, byte [0x7C10]       ; Number of FATs
+    push ax
+    mov al, dl
+    mul cx
+    add bx, ax                  ; BX = data area start LBA
+    pop ax
+    
+    ; Convert cluster to LBA
     sub ax, 2
-    add ax, 33              ; Convert to LBA
+    mov cl, byte [0x7C0D]       ; Sectors per cluster
+    mul cl
+    add ax, bx                  ; AX = LBA
+    
+    ; Convert LBA to CHS
     xor dx, dx
     push bx
-    mov bx, 18
+    mov bx, 18                  ; Sectors per track
     div bx
     pop bx
     mov cx, dx
-    inc cx                  ; Sector
+    inc cx                      ; Sector
+    
     cwd
     push bx
-    mov bx, 2
+    mov bx, 2                   ; Number of heads
     div bx
     pop bx
-    mov dh, dl              ; Head
+    mov dh, dl                  ; Head
     shl ah, 6
     xchg al, ah
-    or cx, ax               ; Cylinder
+    or cx, ax                   ; Cylinder
     
     mov ax, 0x0000
     mov es, ax
@@ -139,7 +183,7 @@ reset_disk:
     mov dl, 0
     int 0x13
     
-    ; Jump to FAT12.BIN
+    ; Jump to FAT32.SYS
     jmp 0x0000:0x7E00
 
 end:
@@ -226,8 +270,8 @@ bootloader_started  db "Bootloader started!", 0
 disk_reset          db 0x0D, 0x0A, "Disk reset!", 0
 loading_os          db 0x0D, 0x0A, "Loading OS...", 0
 
-; FAT12 8.3 filenames (11 bytes each, padded with spaces)
-filename_fat12      db "FAT12   SYS"
+; FAT32 8.3 filenames (11 bytes each, padded with spaces)
+filename_fat32      db "FAT32   SYS"
 
 ; --------------------
 ; Boot sector padding 

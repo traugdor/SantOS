@@ -55,24 +55,39 @@ reset_disk:
     call enable_a20
 
 ; --------------------
-; Read FAT12.BIN from FAT12 filesystem
+; Read FAT16.SYS from FAT16 filesystem
+; FAT16 has different layout than FAT12
+; Root directory starts after FATs
+; For typical FAT16: Reserved + (FATs * FAT_size) = root dir start
 
-    ; Load BOOT folder contents directly from LBA 33
-    mov ax, 0x0800
-    mov es, ax
+    ; Read BPB to get filesystem parameters
+    mov ax, word [0x7C0E]   ; Reserved sectors
+    mov bx, word [0x7C16]   ; Sectors per FAT
+    mov cl, byte [0x7C10]   ; Number of FATs
+    
+    ; Calculate root directory LBA: reserved + (FATs * sectors_per_FAT)
+    push ax
+    mov al, cl
+    mul bx                  ; AX = FATs * sectors_per_FAT
+    pop bx
+    add ax, bx              ; AX = root directory LBA
+    
+    ; Load root directory to 0x0800:0x0000
+    mov bx, 0x0800
+    mov es, bx
     xor bx, bx
     
-    mov ax, 33              ; LBA of BOOT folder on FAT12 floppy
+    ; Convert LBA to CHS
     xor dx, dx
     push bx
-    mov bx, 18
+    mov bx, 18              ; Sectors per track (assuming standard)
     div bx
     pop bx
     mov cx, dx
     inc cx                  ; Sector
     cwd
     push bx
-    mov bx, 2
+    mov bx, 2               ; Heads
     div bx
     pop bx
     mov dh, dl              ; Head
@@ -81,39 +96,63 @@ reset_disk:
     or cx, ax               ; Cylinder
     
     mov ah, 0x02
-    mov al, 1               ; Read 1 sector
+    mov al, 1               ; Read 1 sector of root directory
     mov dl, 0
     int 0x13
     jc end
     
-    ; Search for FAT12.BIN in BOOT folder
+    ; Search for FAT16.SYS in root directory
     mov di, 0
     mov cx, 16
-.search_fat12:
+.search_fat16:
     cmp byte [es:di], 0
     je end
     mov al, [es:di + 11]
     and al, 0x10
-    jnz .next_fat12
+    jnz .next_fat16
     push di
     push cx
-    mov si, filename_fat12
+    mov si, filename_fat16
     mov cx, 11
     repe cmpsb
     pop cx
     pop di
-    je .found_fat12
-.next_fat12:
+    je .found_fat16
+.next_fat16:
     add di, 32
     dec cx
-    jnz .search_fat12
+    jnz .search_fat16
     jmp end
     
-.found_fat12:
-    ; Load FAT12.BIN to 0x7E00
-    mov ax, [es:di + 26]    ; Get cluster
-    sub ax, 2
-    add ax, 33              ; Convert to LBA
+.found_fat16:
+    ; Load FAT16.SYS to 0x7E00
+    ; Get cluster and convert to LBA
+    mov ax, [es:di + 26]    ; Get starting cluster
+    
+    ; Calculate data area start
+    ; data_start = reserved + (FATs * sectors_per_FAT) + root_dir_sectors
+    mov bx, word [0x7C0E]   ; Reserved sectors
+    push ax
+    mov ax, word [0x7C16]   ; Sectors per FAT
+    mov cl, byte [0x7C10]   ; Number of FATs
+    mul cl
+    add bx, ax              ; BX = reserved + FAT area
+    
+    ; Add root directory sectors
+    mov ax, word [0x7C11]   ; Root entry count
+    shl ax, 5               ; * 32 bytes per entry
+    mov cx, word [0x7C0B]   ; Bytes per sector
+    xor dx, dx
+    div cx                  ; AX = root dir sectors
+    add bx, ax              ; BX = data area start LBA
+    
+    pop ax                  ; Restore cluster number
+    sub ax, 2               ; Cluster 2 is first data cluster
+    mov cl, byte [0x7C0D]   ; Sectors per cluster
+    mul cl                  ; AX = cluster offset in sectors
+    add ax, bx              ; AX = LBA of cluster
+    
+    ; Convert LBA to CHS
     xor dx, dx
     push bx
     mov bx, 18
@@ -139,7 +178,7 @@ reset_disk:
     mov dl, 0
     int 0x13
     
-    ; Jump to FAT12.BIN
+    ; Jump to FAT16.SYS
     jmp 0x0000:0x7E00
 
 end:
@@ -226,8 +265,8 @@ bootloader_started  db "Bootloader started!", 0
 disk_reset          db 0x0D, 0x0A, "Disk reset!", 0
 loading_os          db 0x0D, 0x0A, "Loading OS...", 0
 
-; FAT12 8.3 filenames (11 bytes each, padded with spaces)
-filename_fat12      db "FAT12   SYS"
+; FAT16 8.3 filenames (11 bytes each, padded with spaces)
+filename_fat16      db "FAT16   SYS"
 
 ; --------------------
 ; Boot sector padding 

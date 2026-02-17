@@ -1,0 +1,48 @@
+;-----------PRINT ES-------------
+
+    push es
+    ; code usually int 0x13 but could be different
+    pop cx
+    shl cx, 1
+    setc bl
+    or cl, bl
+
+    mov dl, 16           ; loop count
+
+.print_loop:
+    mov ax, 0x0E00
+    mov al, cl
+    and al, 1
+    add al, '0'
+    xor bh, bh
+    int 0x10
+
+    shl cx, 1
+    setc bl
+    or cl, bl
+    dec dl
+    jnz .print_loop
+
+;-----------LBA TO CHS-------------
+    ; load ax with lba
+    xor  dx, dx
+    mov  bx, 18
+    div  bx
+    mov  cx, dx
+    inc  cx                          ; Sector
+    cwd
+    mov  bx, 2
+    div  bx
+    mov  dh, dl                      ; Head
+    shl  ah, 6
+    xchg al, ah
+    or   cx, ax                      ; Cylinder
+
+;-----------PRINT debugging-------------
+    pusha
+    mov ax, 0x0E00 | 'C'
+    mov bx, 0x0000
+    mov cx, 1
+    mov dx, 0x0000
+    int 0x10
+    popa

@@ -28,9 +28,33 @@ if [ $? -ne 0 ]; then
     #exit 1
 fi
 
+nasm -f elf64 -g -F dwarf -o fat12.elf.o fat12.asm
+x86_64-elf-ld -Ttext=0x7E00 -nostdlib -o fat12.elf fat12.elf.o
+objcopy -O binary fat12.elf fat12.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling fat12.asm"
+    exit 1
+fi
+
+nasm -f elf64 -g -F dwarf -o fat16.elf.o fat16.asm
+x86_64-elf-ld -Ttext=0x7E00 -nostdlib -o fat16.elf fat16.elf.o
+objcopy -O binary fat16.elf fat16.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling fat16.asm"
+    #exit 1
+fi
+
+nasm -f elf64 -g -F dwarf -o fat32.elf.o fat32.asm
+x86_64-elf-ld -Ttext=0x7E00 -nostdlib -o fat32.elf fat32.elf.o
+objcopy -O binary fat32.elf fat32.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling fat32.asm"
+    #exit 1
+fi
+
 # For boot2.asm (second stage)
 nasm -f elf64 -g -F dwarf -o boot2.elf.o boot2.asm
-x86_64-elf-ld -Ttext=0x8000 -nostdlib -o boot2.elf boot2.elf.o
+x86_64-elf-ld -Ttext=0x9000 -nostdlib -o boot2.elf boot2.elf.o
 objcopy -O binary boot2.elf boot2.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling boot2.asm"
