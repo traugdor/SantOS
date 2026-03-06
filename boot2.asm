@@ -19,6 +19,9 @@ start:
     call print_string_16
     call delay_16
     
+    ; Detect memory using E820
+    call detect_memory_e820
+    
     ; Setup page tables for identity mapping
     call setup_page_tables
     
@@ -106,6 +109,89 @@ delay_16:
     pop cx
     ret
 
+; Detect memory using BIOS INT 0x15, EAX=0xE820
+; Memory map stored at 0x500:
+;   Offset 0x00: Entry count (4 bytes)
+;   Offset 0x04: First entry (24 bytes)
+;   Each entry: base_addr(8), length(8), type(4), extended(4)
+; Highest usable address stored at 0x8000 (4 bytes)
+detect_memory_e820:
+    push es
+    push di
+    push bp
+    push si
+    
+    xor ax, ax
+    mov es, ax
+    mov di, 0x504       ; ES:DI = 0x0000:0x0504 (first entry, after count)
+    xor bp, bp          ; BP = entry counter
+    xor ebx, ebx        ; EBX must be 0 for first call
+    
+    ; Initialize highest address to 128MB (safe default)
+    mov dword [0x8000], 0x8000000
+    
+.loop:
+    mov eax, 0xE820     ; E820 function
+    mov ecx, 24         ; Request 24 bytes
+    mov edx, 0x534D4150 ; 'SMAP' signature
+    
+    ; Set ACPI 3.0 Extended Attributes to 1 (some BIOSes require this)
+    mov dword [es:di + 20], 1
+    
+    int 0x15
+    
+    jc .done            ; CF set = error or done
+    
+    cmp eax, 0x534D4150 ; Verify 'SMAP' returned
+    jne .done
+    
+    cmp ecx, 20         ; Entry must be at least 20 bytes
+    jb .skip_entry
+    
+    ; Valid entry, increment counter
+    inc bp
+    
+    ; Check if this is usable RAM (type == 1) and calculate highest address
+    cmp dword [es:di + 16], 1   ; Check type field
+    jne .next_entry
+    
+    ; Only process if upper 32 bits of base and length are 0 (below 4GB)
+    cmp dword [es:di + 4], 0
+    jne .next_entry
+    cmp dword [es:di + 12], 0
+    jne .next_entry
+    
+    ; Calculate end address: base + length
+    mov eax, [es:di]        ; Base (lower 32 bits)
+    mov esi, [es:di + 8]    ; Length (lower 32 bits)
+    add eax, esi            ; End address
+    jc .next_entry          ; Skip if overflow
+    
+    ; Update highest if this is higher
+    cmp eax, [0x8000]
+    jbe .next_entry
+    mov [0x8000], eax
+    
+.next_entry:
+    add di, 24          ; Move to next entry (24 bytes)
+    
+.skip_entry:
+    test ebx, ebx       ; EBX = 0 means last entry
+    jz .done
+    jmp .loop
+    
+.done:
+    ; Store entry count at 0x500 (as dword to match kernel)
+    xor eax, eax
+    mov ax, bp
+    mov dword [0x500], eax
+    
+    pop si
+    pop bp
+    pop di
+    pop es
+    ret
+
 ; Setup identity-mapped page tables
 setup_page_tables:
     ; Clear page table area (4KB * 3 = 12KB)
@@ -122,15 +208,33 @@ setup_page_tables:
     mov dword [0x2000], 0x3003 ; Present, writable
     mov dword [0x2004], 0x0000 ; Upper 32 bits
     
-    ; Setup PD entries - map first 8MB with 2MB pages (64-bit entries)
-    mov dword [0x3000], 0x00000083  ; PD[0]: 0-2MB, Present, writable, huge
-    mov dword [0x3004], 0x00000000  ; Upper 32 bits
-    mov dword [0x3008], 0x00200083  ; PD[1]: 2-4MB
-    mov dword [0x300C], 0x00000000  ; Upper 32 bits
-    mov dword [0x3010], 0x00400083  ; PD[2]: 4-6MB
-    mov dword [0x3014], 0x00000000  ; Upper 32 bits
-    mov dword [0x3018], 0x00600083  ; PD[3]: 6-8MB
-    mov dword [0x301C], 0x00000000  ; Upper 32 bits
+    ; Calculate number of 2MB pages needed based on highest address from E820
+    ; Highest address is stored at 0x8000 (4 bytes)
+    mov eax, [0x8000]       ; Get highest usable address
+    
+    ; Round up to next 2MB boundary
+    add eax, 0x001FFFFF     ; Add 2MB - 1
+    shr eax, 21             ; Divide by 2MB (shift right 21 bits)
+    mov ecx, eax            ; ECX = number of 2MB pages to map
+    
+    ; Cap at 512 entries (1GB) to fit in one page directory
+    cmp ecx, 512
+    jbe .map_pages
+    mov ecx, 512
+    
+.map_pages:
+    ; Setup PD entries - map memory with 2MB pages
+    ; Each entry is 8 bytes (64-bit), maps 2MB
+    mov edi, 0x3000         ; Start of PD
+    mov eax, 0x00000083     ; First page: 0MB, Present + Writable + Huge
+    mov ebx, 0x00000000     ; Upper 32 bits
+    
+.map_loop:
+    mov [edi], eax          ; Lower 32 bits
+    mov [edi + 4], ebx      ; Upper 32 bits
+    add eax, 0x00200000     ; Next 2MB page
+    add edi, 8              ; Next PD entry
+    loop .map_loop
     
     ; Set CR3 to PML4 address
     mov eax, 0x1000
@@ -216,10 +320,10 @@ long_mode_start:
     ; Simple kernel copy - just copy everything from ELF to 0x200000
     ; ELF is at 0x20000 (loaded by FAT12.asm to 0x2000:0x0000)
     ; Kernel code starts at offset 0x1000 in ELF
-    ; Copy 32KB to be safe (kernel is ~10KB)
+    ; Copy 128KB to handle larger kernel with syscall support
     mov rsi, 0x21000        ; Source: ELF base (0x20000) + 0x1000 offset
     mov rdi, 0x200000       ; Destination: kernel load address
-    mov rcx, 0x8000         ; Copy 32KB
+    mov rcx, 0x20000        ; Copy 128KB
     rep movsb
     
     ; Set entry point

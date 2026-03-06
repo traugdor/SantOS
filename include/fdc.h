@@ -5,8 +5,13 @@
 
 // Floppy Disk Controller driver for 1.44MB floppy disks
 
+// Detect if FDC is available
+// Returns: 1 if floppy drive detected, 0 if not available
+int fdc_detect(void);
+
 // Initialize the FDC
-void fdc_init(void);
+// Returns: 0 on success, -1 on failure
+int fdc_init(void);
 
 // Read sectors from floppy disk
 // lba: Logical block address (sector number)

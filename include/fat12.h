@@ -22,6 +22,18 @@ int fat12_open(const char* filename, fat12_file_t* file);
 // Read from a file
 int fat12_read(fat12_file_t* file, uint8_t* buffer, uint32_t size);
 
+// Write to a file
+int fat12_write(fat12_file_t* file, const uint8_t* buffer, uint32_t size);
+
+// Update file size in directory entry (call after writing)
+int fat12_update_size(const char* filename, uint32_t new_size);
+
+// Create a new file
+int fat12_create(const char* filename, fat12_file_t* file);
+
+// Delete a file
+int fat12_delete(const char* filename);
+
 // List files in root directory
 int fat12_list_root(void);
 

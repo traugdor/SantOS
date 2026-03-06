@@ -68,6 +68,13 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Assemble syscall handler
+nasm -f elf64 src/syscall_asm.asm -o syscall_asm.o
+if [ $? -ne 0 ]; then
+    echo "Error assembling syscall_asm.asm"
+    exit 1
+fi
+
 # Assemble start.asm (entry point)
 nasm -f elf64 start.asm -o start.o
 if [ $? -ne 0 ]; then
@@ -106,9 +113,16 @@ done
 
 # Link kernel
 echo "  Linking kernel.elf..."
-x86_64-elf-ld -T linker.ld -o kernel.elf start.o $OBJS idt_asm.o
+x86_64-elf-ld -T linker.ld -o kernel.elf start.o $OBJS idt_asm.o syscall_asm.o
 if [ $? -ne 0 ]; then
     echo "Error linking kernel"
+    exit 1
+fi
+
+echo "Building userspace programs..."
+make -C programs
+if [ $? -ne 0 ]; then
+    echo "Error building programs"
     exit 1
 fi
 

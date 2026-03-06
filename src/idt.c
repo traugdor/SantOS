@@ -21,6 +21,9 @@ void idt_set_gate(uint8_t num, uint64_t handler, uint16_t selector, uint8_t flag
 // Load IDT into CPU
 extern void idt_load(uint64_t idt_ptr_addr);
 
+// External handlers
+extern void syscall_handler_asm(void);
+
 // Initialize IDT
 void idt_init(void) {
     // Set up IDT pointer
@@ -38,8 +41,12 @@ void idt_init(void) {
         idt[i].zero = 0;
     }
     
-    // Load IDT (will set up handlers later)
+    // Set up system call handler (INT 0x80)
+    // 0x8E = Present, DPL=0, Type=Interrupt Gate
+    idt_set_gate(0x80, (uint64_t)syscall_handler_asm, 0x08, 0x8E);
+    
+    // Load IDT
     idt_load((uint64_t)&idt_ptr);
     
-    printf("IDT initialized\n");
+    printf("IDT initialized (syscall INT 0x80 registered)\n");
 }

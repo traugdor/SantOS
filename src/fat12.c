@@ -70,6 +70,117 @@ static uint16_t get_fat_entry(uint16_t cluster) {
     return entry;
 }
 
+// Write FAT12 entry (12-bit values packed in bytes)
+static void set_fat_entry(uint16_t cluster, uint16_t value) {
+    uint32_t fat_offset = cluster + (cluster / 2);
+    uint16_t* entry_ptr = (uint16_t*)&fat_buffer[fat_offset];
+    
+    if (cluster & 1) {
+        // Odd cluster: high 12 bits
+        *entry_ptr = (*entry_ptr & 0x000F) | (value << 4);
+    } else {
+        // Even cluster: low 12 bits
+        *entry_ptr = (*entry_ptr & 0xF000) | (value & 0x0FFF);
+    }
+}
+
+// Find free cluster in FAT
+static uint16_t find_free_cluster(void) {
+    // Start from cluster 2 (0 and 1 are reserved)
+    for (uint16_t cluster = 2; cluster < 0xFF0; cluster++) {
+        if (get_fat_entry(cluster) == 0) {
+            return cluster;
+        }
+    }
+    return 0; // No free clusters
+}
+
+// Write FAT table back to disk
+static int write_fat_table(void) {
+    for (int i = 0; i < boot_sector.sectors_per_fat; i++) {
+        if (fdc_write_sectors(fat_start_sector + i, 1, fat_buffer + (i * 512)) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+// Update directory entry file size
+int fat12_update_size(const char* filename, uint32_t new_size) {
+    uint8_t buffer[512];
+    uint32_t entries_per_sector = 512 / sizeof(fat12_dir_entry_t);
+    uint32_t total_sectors = ((boot_sector.root_entries * 32) + 511) / 512;
+    
+    // Convert filename to 8.3 format (uppercase)
+    char name[9] = "        ";
+    char ext[4] = "   ";
+    int i = 0, j = 0;
+    
+    while (filename[i] && filename[i] != '.' && j < 8) {
+        char c = filename[i++];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        name[j++] = c;
+    }
+    
+    if (filename[i] == '.') {
+        i++;
+        j = 0;
+        while (filename[i] && j < 3) {
+            char c = filename[i++];
+            if (c >= 'a' && c <= 'z') c -= 32;
+            ext[j++] = c;
+        }
+    }
+    
+    // Search for file in root directory
+    for (uint32_t sector = 0; sector < total_sectors; sector++) {
+        if (fdc_read_sectors(root_dir_start_sector + sector, 1, buffer) != 0) {
+            return -1;
+        }
+        
+        fat12_dir_entry_t* entries = (fat12_dir_entry_t*)buffer;
+        
+        for (uint32_t idx = 0; idx < entries_per_sector; idx++) {
+            if (entries[idx].filename[0] == 0x00) {
+                return -1; // File not found
+            }
+            
+            if ((uint8_t)entries[idx].filename[0] == 0xE5) {
+                continue;
+            }
+            
+            // Compare filename
+            int match = 1;
+            for (int k = 0; k < 8; k++) {
+                if (name[k] != entries[idx].filename[k]) {
+                    match = 0;
+                    break;
+                }
+            }
+            for (int k = 0; k < 3 && match; k++) {
+                if (ext[k] != entries[idx].extension[k]) {
+                    match = 0;
+                    break;
+                }
+            }
+            
+            if (match) {
+                // Update file size
+                entries[idx].file_size = new_size;
+                
+                // Write directory entry back
+                if (fdc_write_sectors(root_dir_start_sector + sector, 1, buffer) != 0) {
+                    return -1;
+                }
+                
+                return 0;
+            }
+        }
+    }
+    
+    return -1; // File not found
+}
+
 // Initialize FAT12
 int fat12_init(void) {
     // Read boot sector (LBA 0)
@@ -85,8 +196,8 @@ int fat12_init(void) {
     }
     
     // Debug: Show fs_type field
-    printf("Debug: fs_type = '%.8s'\n", boot_sector.fs_type);
-    printf("Debug: OEM = '%.8s'\n", boot_sector.oem_name);
+    // printf("Debug: fs_type = '%.8s'\n", boot_sector.fs_type);
+    // printf("Debug: OEM = '%.8s'\n", boot_sector.oem_name);
     
     // Verify it's FAT (check is optional since we know it's FAT12)
     // Some FAT12 implementations don't set fs_type correctly
@@ -109,13 +220,13 @@ int fat12_init(void) {
         }
     }
     
-    printf("FAT12 initialized:\n");
-    printf("  Bytes per sector: %d\n", boot_sector.bytes_per_sector);
-    printf("  Sectors per cluster: %d\n", boot_sector.sectors_per_cluster);
-    printf("  Root entries: %d\n", boot_sector.root_entries);
-    printf("  FAT start: %d\n", fat_start_sector);
-    printf("  Root dir start: %d\n", root_dir_start_sector);
-    printf("  Data start: %d\n\n", data_start_sector);
+    // printf("FAT12 initialized:\n");
+    // printf("  Bytes per sector: %d\n", boot_sector.bytes_per_sector);
+    // printf("  Sectors per cluster: %d\n", boot_sector.sectors_per_cluster);
+    // printf("  Root entries: %d\n", boot_sector.root_entries);
+    // printf("  FAT start: %d\n", fat_start_sector);
+    // printf("  Root dir start: %d\n", root_dir_start_sector);
+    // printf("  Data start: %d\n\n", data_start_sector);
     
     return 0;
 }
@@ -291,4 +402,227 @@ int fat12_read(fat12_file_t* file, uint8_t* buffer, uint32_t size) {
     }
     
     return bytes_read;
+}
+
+// Write to a file
+int fat12_write(fat12_file_t* file, const uint8_t* buffer, uint32_t size) {
+    uint32_t bytes_written = 0;
+    uint16_t cluster = file->first_cluster;
+    uint8_t sector_buffer[512];
+    
+    while (bytes_written < size && cluster >= 2 && cluster < 0xFF8) {
+        // Calculate sector from cluster
+        uint32_t sector = data_start_sector + ((cluster - 2) * boot_sector.sectors_per_cluster);
+        
+        // Write cluster
+        for (int i = 0; i < boot_sector.sectors_per_cluster && bytes_written < size; i++) {
+            // Fill sector buffer
+            uint32_t to_write = (size - bytes_written > 512) ? 512 : (size - bytes_written);
+            for (uint32_t j = 0; j < to_write; j++) {
+                sector_buffer[j] = buffer[bytes_written++];
+            }
+            
+            // Pad rest of sector with zeros if needed
+            for (uint32_t j = to_write; j < 512; j++) {
+                sector_buffer[j] = 0;
+            }
+            
+            // Write sector
+            if (fdc_write_sectors(sector + i, 1, sector_buffer) != 0) {
+                return -1;
+            }
+        }
+        
+        // Get next cluster or allocate new one if needed
+        uint16_t next_cluster = get_fat_entry(cluster);
+        if (bytes_written < size && (next_cluster >= 0xFF8 || next_cluster == 0)) {
+            // Need to allocate new cluster
+            next_cluster = find_free_cluster();
+            if (next_cluster == 0) {
+                return -1; // Disk full
+            }
+            
+            // Link clusters
+            set_fat_entry(cluster, next_cluster);
+            set_fat_entry(next_cluster, 0xFFF); // Mark as end of chain
+            
+            // Write FAT table
+            if (write_fat_table() != 0) {
+                return -1;
+            }
+        }
+        
+        cluster = next_cluster;
+    }
+    
+    return bytes_written;
+}
+
+// Create a new file
+int fat12_create(const char* filename, fat12_file_t* file) {
+    uint8_t buffer[512];
+    uint32_t entries_per_sector = 512 / sizeof(fat12_dir_entry_t);
+    uint32_t total_sectors = ((boot_sector.root_entries * 32) + 511) / 512;
+    
+    // Convert filename to 8.3 format (uppercase)
+    char name[9] = "        ";
+    char ext[4] = "   ";
+    int i = 0, j = 0;
+    
+    while (filename[i] && filename[i] != '.' && j < 8) {
+        char c = filename[i++];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        name[j++] = c;
+    }
+    
+    if (filename[i] == '.') {
+        i++;
+        j = 0;
+        while (filename[i] && j < 3) {
+            char c = filename[i++];
+            if (c >= 'a' && c <= 'z') c -= 32;
+            ext[j++] = c;
+        }
+    }
+    
+    // Find free directory entry
+    for (uint32_t sector = 0; sector < total_sectors; sector++) {
+        if (fdc_read_sectors(root_dir_start_sector + sector, 1, buffer) != 0) {
+            return -1;
+        }
+        
+        fat12_dir_entry_t* entries = (fat12_dir_entry_t*)buffer;
+        
+        for (uint32_t idx = 0; idx < entries_per_sector; idx++) {
+            // Found free entry (0x00 or 0xE5)
+            if (entries[idx].filename[0] == 0x00 || (uint8_t)entries[idx].filename[0] == 0xE5) {
+                // Allocate first cluster
+                uint16_t first_cluster = find_free_cluster();
+                if (first_cluster == 0) {
+                    return -1; // Disk full
+                }
+                
+                // Mark cluster as end of chain
+                set_fat_entry(first_cluster, 0xFFF);
+                
+                // Write FAT table
+                if (write_fat_table() != 0) {
+                    return -1;
+                }
+                
+                // Create directory entry
+                for (int k = 0; k < 8; k++) entries[idx].filename[k] = name[k];
+                for (int k = 0; k < 3; k++) entries[idx].extension[k] = ext[k];
+                entries[idx].attributes = 0x20; // Archive attribute
+                entries[idx].reserved = 0;
+                entries[idx].first_cluster_high = 0;
+                entries[idx].first_cluster_low = first_cluster;
+                entries[idx].file_size = 0;
+                
+                // Write directory entry back
+                if (fdc_write_sectors(root_dir_start_sector + sector, 1, buffer) != 0) {
+                    return -1;
+                }
+                
+                // Fill file structure
+                for (int k = 0; k < 8; k++) file->name[k] = name[k];
+                file->size = 0;
+                file->first_cluster = first_cluster;
+                file->is_directory = 0;
+                
+                return 0;
+            }
+        }
+    }
+    
+    return -1; // No free directory entries
+}
+
+// Delete a file
+int fat12_delete(const char* filename) {
+    uint8_t buffer[512];
+    uint32_t entries_per_sector = 512 / sizeof(fat12_dir_entry_t);
+    uint32_t total_sectors = ((boot_sector.root_entries * 32) + 511) / 512;
+    
+    // Convert filename to 8.3 format (uppercase)
+    char name[9] = "        ";
+    char ext[4] = "   ";
+    int i = 0, j = 0;
+    
+    while (filename[i] && filename[i] != '.' && j < 8) {
+        char c = filename[i++];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        name[j++] = c;
+    }
+    
+    if (filename[i] == '.') {
+        i++;
+        j = 0;
+        while (filename[i] && j < 3) {
+            char c = filename[i++];
+            if (c >= 'a' && c <= 'z') c -= 32;
+            ext[j++] = c;
+        }
+    }
+    
+    // Search for file in root directory
+    for (uint32_t sector = 0; sector < total_sectors; sector++) {
+        if (fdc_read_sectors(root_dir_start_sector + sector, 1, buffer) != 0) {
+            return -1;
+        }
+        
+        fat12_dir_entry_t* entries = (fat12_dir_entry_t*)buffer;
+        
+        for (uint32_t idx = 0; idx < entries_per_sector; idx++) {
+            if (entries[idx].filename[0] == 0x00) {
+                return -1; // File not found
+            }
+            
+            if ((uint8_t)entries[idx].filename[0] == 0xE5) {
+                continue;
+            }
+            
+            // Compare filename
+            int match = 1;
+            for (int k = 0; k < 8; k++) {
+                if (name[k] != entries[idx].filename[k]) {
+                    match = 0;
+                    break;
+                }
+            }
+            for (int k = 0; k < 3 && match; k++) {
+                if (ext[k] != entries[idx].extension[k]) {
+                    match = 0;
+                    break;
+                }
+            }
+            
+            if (match) {
+                // Free cluster chain
+                uint16_t cluster = entries[idx].first_cluster_low;
+                while (cluster >= 2 && cluster < 0xFF8) {
+                    uint16_t next = get_fat_entry(cluster);
+                    set_fat_entry(cluster, 0); // Mark as free
+                    cluster = next;
+                }
+                
+                // Write FAT table
+                if (write_fat_table() != 0) {
+                    return -1;
+                }
+                
+                // Mark directory entry as deleted
+                entries[idx].filename[0] = (char)0xE5;
+                
+                // Write directory entry back
+                if (fdc_write_sectors(root_dir_start_sector + sector, 1, buffer) != 0) {
+                    return -1;
+                }
+                
+                return 0;
+            }
+        }
+    }
+    
+    return -1; // File not found
 }

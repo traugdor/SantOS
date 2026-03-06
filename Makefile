@@ -13,7 +13,7 @@ NASMFLAGS = -f elf64 -g -F dwarf
 
 # Source files
 C_SOURCES = $(wildcard src/*.c) kernel.c
-ASM_SOURCES = start.asm src/idt_asm.asm
+ASM_SOURCES = start.asm src/idt_asm.asm src/syscall_asm.asm
 
 # Object files
 C_OBJECTS = $(C_SOURCES:.c=.o)
@@ -55,22 +55,27 @@ KERNEL_ELF = kernel.elf
 DISK_IMG = disk.img
 
 # Default target
-.PHONY: all clean build bootloader stage2 kernel disk run help
+.PHONY: all clean build bootloader stage2 kernel disk run help programs
 
 all: clean build disk
 
 build: bootloader stage2 kernel
 
-bootloader: $(BOOT12_BIN) $(BOOT16_BIN) $(BOOT32_BIN)
+programs:
+	@echo "Building userspace programs..."
+	@$(MAKE) -C programs
+	@echo "✓ Programs built successfully"
+
+bootloader: $(BOOT12_BIN)
 	@echo "✓ Bootloader built successfully"
 
-stage2: $(BOOT2_BIN) $(FAT12_BIN) $(FAT16_BIN) $(FAT32_BIN)
+stage2: $(BOOT2_BIN) $(FAT12_BIN)
 	@echo "✓ Stage 2 bootloader and FAT drivers built successfully"
 
 kernel: $(KERNEL_ELF)
 	@echo "✓ Kernel built successfully"
 
-disk: build
+disk: build programs
 	@echo "Creating 1.44MB FAT12 floppy disk image..."
 	@bash create_disk.sh
 	@echo "✓ Disk image created successfully"
@@ -224,6 +229,7 @@ help:
 	@echo "  make bootloader - Compile boot12/boot16/boot32.asm files"
 	@echo "  make stage2     - Compile boot2.asm"
 	@echo "  make kernel     - Compile kernel.elf"
+	@echo "  make programs   - Build userspace programs (independent of kernel)"
 	@echo "  make disk       - Create 1.44MB FAT12 floppy disk image"
 	@echo "  make run        - Clean, build, create disk, and run in QEMU"
 	@echo "  make debug      - Clean, build, create disk, run QEMU with GDB, and attach debugger"

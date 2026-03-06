@@ -22,6 +22,12 @@ mcopy -i disk.img fat12.bin ::/BOOT/FAT12.SYS
 mcopy -i disk.img boot2.bin ::/BOOT/BOOT2.BIN
 mcopy -i disk.img kernel.elf ::/BOOT/KERNEL.ELF
 
+# Copy userspace programs
+if [ -f programs/shell/shell.bin ]; then
+    mcopy -i disk.img programs/shell/shell.bin ::/SHELL.BIN
+    echo "  Copied SHELL.BIN"
+fi
+
 echo "Creating test file..."
 cat > test.txt << 'EOF'
 Hello from SantOS filesystem!

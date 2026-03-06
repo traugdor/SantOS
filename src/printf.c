@@ -80,6 +80,37 @@ static void print_unsigned(unsigned int num, int base, void (*putc)(char, void*)
     }
 }
 
+// Helper to print a floating-point number with precision
+static void print_float(long double num, int precision, void (*putc)(char, void*), void* ctx) {
+    // Handle negative numbers
+    if (num < 0) {
+        putc('-', ctx);
+        num = -num;
+    }
+    
+    // Print integer part
+    long long int_part = (long long)num;
+    print_signed((int)int_part, putc, ctx);
+    
+    // Print decimal point
+    putc('.', ctx);
+    
+    // Print fractional part
+    long double frac_part = num - (long double)int_part;
+    
+    // Ensure we have at least some precision
+    if (precision == 0) {
+        precision = 1;
+    }
+    
+    for (int i = 0; i < precision; i++) {
+        frac_part *= 10.0L;
+        long long digit = (long long)frac_part;
+        putc('0' + (char)digit, ctx);
+        frac_part -= (long double)digit;
+    }
+}
+
 // Generic printf implementation
 static int vprintf_internal(void (*putc)(char, void*), void* ctx, const char* format, va_list args) {
     int count = 0;
@@ -87,6 +118,22 @@ static int vprintf_internal(void (*putc)(char, void*), void* ctx, const char* fo
     for (int i = 0; format[i] != '\0'; i++) {
         if (format[i] == '%') {
             i++;
+            
+            // Parse precision for floating-point (e.g., %.1f)
+            int precision = 6;  // Default precision
+            int has_precision = 0;
+            
+            if (format[i] == '.') {
+                has_precision = 1;
+                i++;
+                precision = 0;
+                while (format[i] >= '0' && format[i] <= '9') {
+                    precision = precision * 10 + (format[i] - '0');
+                    i++;
+                }
+            }
+            
+            // Now format[i] should be the format character (f, d, s, etc.)
             switch (format[i]) {
                 case 's': {
                     const char* str = va_arg(args, const char*);
@@ -105,6 +152,12 @@ static int vprintf_internal(void (*putc)(char, void*), void* ctx, const char* fo
                 case 'd': {
                     int num = va_arg(args, int);
                     print_signed(num, putc, ctx);
+                    count++;  // Approximate
+                    break;
+                }
+                case 'f': {
+                    long double num = va_arg(args, long double);
+                    print_float(num, precision, putc, ctx);
                     count++;  // Approximate
                     break;
                 }

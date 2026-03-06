@@ -1,11 +1,11 @@
 # SantOS - x86_64 Operating System
 
-A complete x86_64 operating system with multi-stage bootloader, FAT12/16/32 filesystem support, and a 64-bit kernel.
+A complete x86_64 operating system with multi-stage bootloader, FAT12 filesystem support, a 64-bit kernel with heap allocation, system call interface, and an interactive shell.
 
 ## Features
 
 ### Bootloader System
-- **Multi-filesystem support**: FAT12, FAT16, and FAT32 bootloaders
+- **Multi-filesystem support**: FAT12 (fully functional), FAT16 (WIP), and FAT32 (WIP) bootloaders
 - **Three-stage boot process**:
   - **Stage 1** (boot12/16/32.asm): MBR bootloader (512 bytes)
   - **Stage 1.5** (fat12/16/32.asm): Filesystem driver (512 bytes)
@@ -20,13 +20,24 @@ A complete x86_64 operating system with multi-stage bootloader, FAT12/16/32 file
   - PS/2 keyboard input
   - PIT timer (1ms resolution)
   - FDC (Floppy Disk Controller) with DMA support
-  - ATA/IDE disk controller (with timeout handling)
+  - ATA/IDE disk controller (with timeout handling) (WIP)
 - **Filesystem drivers**:
   - FAT12 (floppy disks) - fully functional with FDC
-  - FAT16 (small partitions)
-  - FAT32 (large partitions)
+  - FAT16 (small partitions) (WIP)
+  - FAT32 (large partitions) (WIP)
 - **DMA Controller**: 8237 DMA setup for floppy disk transfers
 - **Interrupt handling**: IDT setup with hardware interrupt support
+- **Memory management**:
+  - Physical memory manager (bitmap allocator) with E820 detection
+  - Virtual memory manager (paging) with dynamic mapping up to 1GB
+  - Kernel heap (malloc/free/realloc/calloc)
+- **System call interface**: INT 0x80 for kernel-userspace communication
+- **Program loader**: Loads and executes flat binary programs from FAT12 filesystem
+
+### Userspace
+- **Interactive shell** (SantOS Shell v1.0): Command prompt with keyboard input
+- **System call wrappers**: Userspace libraries for stdio, stdlib, and string functions
+- **Separate build system**: Programs built independently and linked with syscall libraries
 
 ## Building
 
@@ -48,6 +59,7 @@ This creates a 1.44MB FAT12 floppy disk image (`disk.img`) with:
 - FAT12.SYS filesystem driver
 - BOOT2.BIN second-stage loader
 - KERNEL.ELF 64-bit kernel
+- SHELL.BIN interactive shell program (WIP)
 - TEST.TXT sample file
 
 ## Running
@@ -56,7 +68,7 @@ This creates a 1.44MB FAT12 floppy disk image (`disk.img`) with:
 ```bash
 make run
 # or
-qemu-system-x86_64 -fda disk.img
+qemu-system-x86_64 -m 512 -fda disk.img
 ```
 
 ### QEMU with GDB Debugging
@@ -74,35 +86,52 @@ make debug
 ```
 bootloader/
 ├── boot12.asm          # FAT12 MBR bootloader
-├── boot16.asm          # FAT16 MBR bootloader
-├── boot32.asm          # FAT32 MBR bootloader
+├── boot16.asm          # FAT16 MBR bootloader (WIP)
+├── boot32.asm          # FAT32 MBR bootloader (WIP)
 ├── fat12.asm           # FAT12 filesystem driver (stage 1.5)
-├── fat16.asm           # FAT16 filesystem driver (stage 1.5)
-├── fat32.asm           # FAT32 filesystem driver (stage 1.5)
+├── fat16.asm           # FAT16 filesystem driver (stage 1.5) (WIP)
+├── fat32.asm           # FAT32 filesystem driver (stage 1.5) (WIP)
 ├── boot2.asm           # Second stage: 64-bit transition
 ├── kernel.c            # Kernel entry point
 ├── start.asm           # Kernel assembly entry
 ├── linker.ld           # Kernel linker script
+├── Makefile            # Main build system
+├── build.sh            # Full build script
+├── quick.sh            # Quick build + run
+├── quick_k.sh          # Quick kernel rebuild + run
+├── create_disk.sh      # Disk image creation
 ├── include/            # Header files
 │   ├── fat12.h
-│   ├── fat16.h
-│   ├── fat32.h
 │   ├── fdc.h          # Floppy Disk Controller
-│   ├── ata.h
 │   ├── keyboard.h
 │   ├── timer.h
 │   ├── idt.h
+│   ├── heap.h         # Kernel heap allocator
+│   ├── syscall.h      # System call definitions
+│   ├── pmem.h         # Physical memory manager
+│   ├── vmem.h         # Virtual memory manager
 │   └── ...
-└── src/                # Kernel source files
-    ├── fat12.c
-    ├── fat16.c
-    ├── fat32.c
-    ├── fdc.c          # FDC with DMA support
-    ├── ata.c
-    ├── keyboard.c
-    ├── timer.c
-    ├── idt.c
-    └── ...
+├── src/                # Kernel source files
+│   ├── fat12.c
+│   ├── fdc.c          # FDC with DMA support
+│   ├── keyboard.c
+│   ├── timer.c
+│   ├── idt.c
+│   ├── heap.c         # malloc/free/realloc/calloc
+│   ├── pmem.c         # Physical memory bitmap allocator
+│   ├── vmem.c         # Virtual memory / paging
+│   ├── syscall.c      # Kernel syscall handler
+│   ├── syscall_asm.asm # INT 0x80 assembly entry
+│   ├── loader.c       # Program loader
+│   └── ...
+└── programs/           # Userspace programs
+    ├── Makefile        # Programs build system
+    ├── lib/            # Userspace syscall libraries
+    │   ├── stdio.c    # printf, putchar, getchar
+    │   ├── stdlib.c   # malloc, free, realloc, calloc
+    │   └── string.c   # strlen, strcmp, strcpy, memcpy, etc.
+    └── shell/          # Interactive shell
+        └── shell.c    # SantOS Shell v1.0
 ```
 
 ## Technical Details
@@ -112,11 +141,13 @@ bootloader/
 - `0x7E00`: Stage 1.5 filesystem driver (512 bytes)
 - `0x9000`: Stage 2 bootloader (boot2.bin, 2KB)
 - `0x20000`: Kernel ELF file (loaded by FAT driver)
+- `0x100000`: Userspace program load address
 - `0x200000`: Kernel execution address (copied from ELF)
 - `0x1000-0x3FFF`: Page tables (PML4, PDPT, PD)
 - `0x80000`: Kernel stack (16KB)
 - `0x90000`: Boot stack
 - `0xB8000`: VGA text mode buffer
+- Dynamic page tables map up to 1GB based on E820 memory map
 
 ### Boot Process
 1. **BIOS** loads MBR (boot12.asm) to 0x7C00
@@ -132,7 +163,27 @@ bootloader/
    - Enters 64-bit long mode
    - Parses ELF header and copies kernel to 0x200000
    - Jumps to kernel entry point
-5. **Kernel** initializes hardware and filesystem
+5. **Kernel** initializes hardware, filesystem, heap, and syscall interface
+6. **Shell** loaded from SHELL.BIN and executed via program loader
+
+### System Call Interface
+Userspace programs communicate with the kernel via `INT 0x80`:
+
+| Syscall | Number | Description |
+|---------|--------|-------------|
+| PUTCHAR | 0 | Write character to screen |
+| GETCHAR | 1 | Read character from keyboard |
+| PRINTF  | 2 | Print formatted string |
+| MALLOC  | 3 | Allocate heap memory |
+| FREE    | 4 | Free heap memory |
+| REALLOC | 5 | Reallocate heap memory |
+| CALLOC  | 6 | Allocate zeroed memory |
+| STRLEN  | 10 | String length |
+| STRCMP  | 11 | String compare |
+| STRCPY  | 12 | String copy |
+| STRCAT  | 13 | String concatenate |
+| MEMCPY  | 14 | Memory copy |
+| MEMSET  | 15 | Memory set |
 
 ### Long Mode Transition
 1. Enable A20 line (BIOS and keyboard controller methods)
@@ -149,8 +200,8 @@ bootloader/
 
 ### FAT Filesystem Drivers
 
-| Feature | FAT12 | FAT16 | FAT32 |
-|---------|-------|-------|-------|
+| Feature | FAT12 | FAT16 (WIP) | FAT32 (WIP) |
+|---------|-------|-------------|-------------|
 | FAT Entry Size | 12 bits | 16 bits | 32 bits (28 used) |
 | Max Clusters | ~4,084 | ~65,524 | ~268M |
 | Root Directory | Fixed location | Fixed location | Cluster chain |
@@ -179,7 +230,7 @@ All filesystem drivers support:
 ### Testing
 - **QEMU** (qemu-system-x86_64)
 - **GDB** (optional, for debugging)
-- **VirtualBox** (optional, alternative to QEMU)
+- **VirtualBox** (optional, alternative to QEMU) (WIP)
 
 ## Development Notes
 
@@ -223,3 +274,9 @@ The kernel is compiled as an ELF64 executable. Boot2.asm:
 ## License
 
 This project is provided as-is for educational purposes.
+
+## Notes
+
+***__It is not recommended to use this as a production bootloader. All code provided is untested in a real system and may contain bugs that could cause data loss or system instability. For example, I have only been able to get it to successfully run in QEMU, not in VirtualBox. Use at your own risk.__***
+
+Feel free to fork and modify for your own projects. If you feel you have a significant improvement, consider contributing back to the project and explain in thorough detail what you have done and why so that I can learn from your improvements!

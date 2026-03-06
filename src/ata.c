@@ -55,11 +55,45 @@ static int ata_wait_drq(void) {
     return timeout > 0 ? 0 : -1;
 }
 
+// Detect if ATA drive is available
+int ata_detect(void) {
+    // Try to read the status register
+    uint8_t status = inb(ATA_PRIMARY_STATUS);
+    
+    // If we get 0xFF, no drive is present
+    if (status == 0xFF) {
+        return 0;
+    }
+    
+    // Select master drive
+    outb(ATA_PRIMARY_DRIVE, 0xA0);
+    
+    // Wait and check if drive responds
+    if (ata_wait_ready() != 0) {
+        return 0; // Timeout, no drive
+    }
+    
+    // Read status again
+    status = inb(ATA_PRIMARY_STATUS);
+    
+    // Check if status is valid (not 0x00 or 0xFF)
+    if (status == 0x00 || status == 0xFF) {
+        return 0;
+    }
+    
+    return 1; // ATA drive detected
+}
+
 // Initialize ATA
-void ata_init(void) {
+int ata_init(void) {
     // Select master drive (drive 0)
     outb(ATA_PRIMARY_DRIVE, 0xA0);
-    ata_wait_ready();
+    
+    if (ata_wait_ready() != 0) {
+        return -1; // No drive or timeout
+    }
+    
+    return 0;
 }
 
 // Read sectors from disk
