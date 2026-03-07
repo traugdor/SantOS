@@ -5,9 +5,11 @@
 #include <stddef.h>
 
 // System call numbers - I/O
-#define SYSCALL_PUTCHAR  0
-#define SYSCALL_GETCHAR  1
-#define SYSCALL_PRINTF   2
+#define SYSCALL_PUTCHAR   0
+#define SYSCALL_GETCHAR   1
+#define SYSCALL_PRINTF    2
+#define SYSCALL_CLEAR     3
+#define SYSCALL_SET_COLOR 4
 
 // System call numbers - Memory
 #define SYSCALL_MALLOC   10
@@ -23,10 +25,18 @@
 #define SYSCALL_MEMCPY   24
 #define SYSCALL_MEMSET   25
 
+// System call numbers - Filesystem
+#define SYSCALL_LIST_DIR    30
+#define SYSCALL_LIST_DIR_CLUSTER 31
+#define SYSCALL_FIND_ENTRY  32
+
+// System call numbers - Program execution
+#define SYSCALL_EXEC_PROGRAM 40
+
 // System call interface for userspace programs
 int syscall(int num, ...);
 
 // Kernel-side system call handler
-void syscall_handler(void);
+uint64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uint64_t arg3);
 
 #endif

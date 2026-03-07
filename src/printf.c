@@ -119,6 +119,20 @@ static int vprintf_internal(void (*putc)(char, void*), void* ctx, const char* fo
         if (format[i] == '%') {
             i++;
             
+            // Parse flags (-, +, 0, space, #)
+            int left_align = 0;
+            if (format[i] == '-') {
+                left_align = 1;
+                i++;
+            }
+            
+            // Parse width
+            int width = 0;
+            while (format[i] >= '0' && format[i] <= '9') {
+                width = width * 10 + (format[i] - '0');
+                i++;
+            }
+            
             // Parse precision for floating-point (e.g., %.1f)
             int precision = 6;  // Default precision
             int has_precision = 0;
@@ -137,9 +151,30 @@ static int vprintf_internal(void (*putc)(char, void*), void* ctx, const char* fo
             switch (format[i]) {
                 case 's': {
                     const char* str = va_arg(args, const char*);
+                    int len = 0;
+                    const char* p = str;
+                    while (*p++) len++;
+                    
+                    // Padding
+                    if (!left_align && width > len) {
+                        for (int j = 0; j < width - len; j++) {
+                            putc(' ', ctx);
+                            count++;
+                        }
+                    }
+                    
+                    // Print string
                     while (*str) {
                         putc(*str++, ctx);
                         count++;
+                    }
+                    
+                    // Right padding for left-align
+                    if (left_align && width > len) {
+                        for (int j = 0; j < width - len; j++) {
+                            putc(' ', ctx);
+                            count++;
+                        }
                     }
                     break;
                 }
@@ -151,8 +186,37 @@ static int vprintf_internal(void (*putc)(char, void*), void* ctx, const char* fo
                 }
                 case 'd': {
                     int num = va_arg(args, int);
+                    // Calculate length of number
+                    int len = 0;
+                    int temp = num;
+                    if (temp < 0) {
+                        len++;
+                        temp = -temp;
+                    }
+                    if (temp == 0) len = 1;
+                    while (temp > 0) {
+                        len++;
+                        temp /= 10;
+                    }
+                    
+                    // Left padding
+                    if (!left_align && width > len) {
+                        for (int j = 0; j < width - len; j++) {
+                            putc(' ', ctx);
+                            count++;
+                        }
+                    }
+                    
                     print_signed(num, putc, ctx);
                     count++;  // Approximate
+                    
+                    // Right padding
+                    if (left_align && width > len) {
+                        for (int j = 0; j < width - len; j++) {
+                            putc(' ', ctx);
+                            count++;
+                        }
+                    }
                     break;
                 }
                 case 'f': {

@@ -22,11 +22,17 @@ mcopy -i disk.img fat12.bin ::/BOOT/FAT12.SYS
 mcopy -i disk.img boot2.bin ::/BOOT/BOOT2.BIN
 mcopy -i disk.img kernel.elf ::/BOOT/KERNEL.ELF
 
-# Copy userspace programs
-if [ -f programs/shell/shell.bin ]; then
-    mcopy -i disk.img programs/shell/shell.bin ::/SHELL.BIN
-    echo "  Copied SHELL.BIN"
-fi
+# Copy userspace programs - copy all .elf files from programs/ root
+echo "Copying userspace programs..."
+for elf_file in programs/*.elf; do
+    if [ -f "$elf_file" ]; then
+        # Get uppercase filename for FAT12
+        base_name=$(basename "$elf_file")
+        upper_name=$(echo "$base_name" | tr '[:lower:]' '[:upper:]')
+        mcopy -i disk.img "$elf_file" "::/$(echo $upper_name)"
+        echo "  Copied $upper_name"
+    fi
+done
 
 echo "Creating test file..."
 cat > test.txt << 'EOF'

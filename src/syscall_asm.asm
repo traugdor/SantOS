@@ -6,42 +6,34 @@ global syscall_handler_asm
 extern syscall_handler
 
 ; INT 0x80 handler - saves context, calls kernel handler, restores context
+; On entry from INT 0x80: rax=syscall_num, rdi=arg1, rsi=arg2, rdx=arg3
 syscall_handler_asm:
-    ; Save all registers
-    push rax
+    ; Save callee-saved registers
     push rbx
-    push rcx
-    push rdx
-    push rsi
-    push rdi
     push rbp
-    push r8
-    push r9
-    push r10
-    push r11
     push r12
     push r13
     push r14
     push r15
     
-    ; Call kernel syscall handler
+    ; Rearrange registers for C calling convention:
+    ; syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3)
+    ; C expects: rdi=num, rsi=arg1, rdx=arg2, rcx=arg3
+    ; We have:   rax=num, rdi=arg1, rsi=arg2, rdx=arg3
+    mov rcx, rdx    ; rcx = arg3 (must be first to avoid overwrite)
+    mov rdx, rsi    ; rdx = arg2
+    mov rsi, rdi    ; rsi = arg1
+    mov rdi, rax    ; rdi = syscall_num
+    
     call syscall_handler
     
-    ; Restore all registers (except RAX which has return value)
+    ; Restore callee-saved registers
     pop r15
     pop r14
     pop r13
     pop r12
-    pop r11
-    pop r10
-    pop r9
-    pop r8
     pop rbp
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
     pop rbx
-    add rsp, 8  ; Skip saved RAX, keep new RAX from syscall_handler
     
+    ; RAX now contains the return value from syscall_handler
     iretq

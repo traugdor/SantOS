@@ -131,10 +131,15 @@ void kernel_main(void) {
     
     // Load and execute shell program
     void* shell_addr = (void*)0x100000;  // Load at 1MB
-    if (load_program("SHELL.BIN", shell_addr) == 0) {
-        execute_program(shell_addr);
+    uint64_t entry_point = load_program("SHELL.ELF", shell_addr);
+    if (entry_point != 0) {
+        execute_program(entry_point, "SHELL.ELF", 1);  // kernel_mode=1 (halt on exit)
     } else {
         printf("Failed to load shell. Halting.\n");
         __asm__ volatile("1: hlt; jmp 1b");
     }
+
+    //if we get here, notify user to power off computer
+    printf("It is now safe to turn off your computer.\n");
+    __asm__ volatile("hlt");
 }

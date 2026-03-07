@@ -298,6 +298,188 @@ int fat12_list_root(void) {
     return 0;
 }
 
+// List files in a specific directory by cluster
+int fat12_list_dir(uint16_t cluster) {
+    uint8_t buffer[512];
+    
+    // If cluster is 0, list root directory
+    if (cluster == 0) {
+        return fat12_list_root();
+    }
+    
+    printf("Directory contents:\n");
+    printf("%-12s %10s\n", "Name", "Size");
+    printf("------------------------\n");
+    
+    // Read directory clusters
+    while (cluster >= 2 && cluster < 0xFF8) {
+        uint32_t sector = data_start_sector + ((cluster - 2) * boot_sector.sectors_per_cluster);
+        
+        for (int s = 0; s < boot_sector.sectors_per_cluster; s++) {
+            if (fdc_read_sectors(sector + s, 1, buffer) != 0) {
+                return -1;
+            }
+            
+            fat12_dir_entry_t* entries = (fat12_dir_entry_t*)buffer;
+            uint32_t entries_per_sector = 512 / sizeof(fat12_dir_entry_t);
+            
+            for (uint32_t i = 0; i < entries_per_sector; i++) {
+                // End of directory
+                if (entries[i].filename[0] == 0x00) {
+                    return 0;
+                }
+                
+                // Deleted file
+                if (entries[i].filename[0] == 0xE5) {
+                    continue;
+                }
+                
+                // Skip volume label and long filenames
+                if (entries[i].attributes & 0x08 || entries[i].attributes == 0x0F) {
+                    continue;
+                }
+                
+                // Skip . and .. entries in display (but they exist)
+                if (entries[i].filename[0] == '.') {
+                    continue;
+                }
+                
+                char name[13];
+                format_filename(&entries[i], name);
+                
+                if (entries[i].attributes & 0x10) {
+                    printf("%-12s %10s\n", name, "<DIR>");
+                } else {
+                    printf("%-12s %10d\n", name, entries[i].file_size);
+                }
+            }
+        }
+        
+        // Get next cluster
+        cluster = get_fat_entry(cluster);
+    }
+    
+    return 0;
+}
+
+// Find a directory entry by name in current directory (0 = root)
+uint16_t fat12_find_entry(uint16_t dir_cluster, const char* name, int* is_directory) {
+    uint8_t buffer[512];
+    
+    // Convert filename to 8.3 format (uppercase)
+    char fname[9] = "        ";
+    char ext[4] = "   ";
+    int i = 0, j = 0;
+    
+    while (name[i] && name[i] != '.' && j < 8) {
+        char c = name[i++];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        fname[j++] = c;
+    }
+    
+    if (name[i] == '.') {
+        i++;
+        j = 0;
+        while (name[i] && j < 3) {
+            char c = name[i++];
+            if (c >= 'a' && c <= 'z') c -= 32;
+            ext[j++] = c;
+        }
+    }
+    
+    // Search in root directory
+    if (dir_cluster == 0) {
+        uint32_t entries_per_sector = 512 / sizeof(fat12_dir_entry_t);
+        uint32_t total_sectors = ((boot_sector.root_entries * 32) + 511) / 512;
+        
+        for (uint32_t sector = 0; sector < total_sectors; sector++) {
+            if (fdc_read_sectors(root_dir_start_sector + sector, 1, buffer) != 0) {
+                return 0;
+            }
+            
+            fat12_dir_entry_t* entries = (fat12_dir_entry_t*)buffer;
+            
+            for (uint32_t idx = 0; idx < entries_per_sector; idx++) {
+                if (entries[idx].filename[0] == 0x00) {
+                    return 0;
+                }
+                
+                if (entries[idx].filename[0] == 0xE5) {
+                    continue;
+                }
+                
+                // Compare filename
+                int match = 1;
+                for (int k = 0; k < 8; k++) {
+                    if (fname[k] != entries[idx].filename[k]) {
+                        match = 0;
+                        break;
+                    }
+                }
+                for (int k = 0; k < 3 && match; k++) {
+                    if (ext[k] != entries[idx].extension[k]) {
+                        match = 0;
+                        break;
+                    }
+                }
+                
+                if (match) {
+                    *is_directory = (entries[idx].attributes & 0x10) ? 1 : 0;
+                    return entries[idx].first_cluster_low;
+                }
+            }
+        }
+    } else {
+        // Search in subdirectory
+        while (dir_cluster >= 2 && dir_cluster < 0xFF8) {
+            uint32_t sector = data_start_sector + ((dir_cluster - 2) * boot_sector.sectors_per_cluster);
+            
+            for (int s = 0; s < boot_sector.sectors_per_cluster; s++) {
+                if (fdc_read_sectors(sector + s, 1, buffer) != 0) {
+                    return 0;
+                }
+                
+                fat12_dir_entry_t* entries = (fat12_dir_entry_t*)buffer;
+                uint32_t entries_per_sector = 512 / sizeof(fat12_dir_entry_t);
+                
+                for (uint32_t idx = 0; idx < entries_per_sector; idx++) {
+                    if (entries[idx].filename[0] == 0x00) {
+                        return 0;
+                    }
+                    
+                    if (entries[idx].filename[0] == 0xE5) {
+                        continue;
+                    }
+                    
+                    // Compare filename
+                    int match = 1;
+                    for (int k = 0; k < 8; k++) {
+                        if (fname[k] != entries[idx].filename[k]) {
+                            match = 0;
+                            break;
+                        }
+                    }
+                    for (int k = 0; k < 3 && match; k++) {
+                        if (ext[k] != entries[idx].extension[k]) {
+                            match = 0;
+                            break;
+                        }
+                    }
+                    
+                    if (match) {
+                        *is_directory = (entries[idx].attributes & 0x10) ? 1 : 0;
+                        return entries[idx].first_cluster_low;
+                    }
+                }
+            }
+            
+            dir_cluster = get_fat_entry(dir_cluster);
+        }
+    }
+    
+    return 0;
+}
+
 // Open a file
 int fat12_open(const char* filename, fat12_file_t* file) {
     uint8_t buffer[512];

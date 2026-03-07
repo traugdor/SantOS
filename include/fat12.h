@@ -37,4 +37,12 @@ int fat12_delete(const char* filename);
 // List files in root directory
 int fat12_list_root(void);
 
+// List files in a specific directory by cluster
+int fat12_list_dir(uint16_t cluster);
+
+// Find a directory entry by name in current directory (0 = root)
+// Returns cluster number of entry, or 0 if not found
+// Sets is_directory to 1 if entry is a directory
+uint16_t fat12_find_entry(uint16_t dir_cluster, const char* name, int* is_directory);
+
 #endif

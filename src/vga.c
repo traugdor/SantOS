@@ -57,9 +57,10 @@ void vga_scroll(void) {
         }
     }
     
-    // Clear the last line
+    // Clear the last line with default color (white on black)
+    uint8_t default_color = 0x0F; // White on black
     for (int x = 0; x < VGA_WIDTH; x++) {
-        vga_buffer[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = vga_entry(' ', current_color);
+        vga_buffer[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = vga_entry(' ', default_color);
     }
     
     cursor_y = VGA_HEIGHT - 1;
