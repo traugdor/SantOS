@@ -92,6 +92,8 @@ $(BOOT12_ELF): $(BOOT12_OBJ)
 $(BOOT12_BIN): $(BOOT12_ELF)
 	@echo "Converting boot12.elf to binary..."
 	$(OBJCOPY) -O binary $< $@
+	@echo "Padding boot12.bin to 512 bytes..."
+	truncate -s 512 $@
 
 # Boot16 (FAT16 bootloader - optional)
 $(BOOT16_OBJ): boot16.asm
@@ -126,11 +128,13 @@ $(BOOT2_OBJ): boot2.asm
 
 $(BOOT2_ELF): $(BOOT2_OBJ)
 	@echo "Linking boot2.elf..."
-	$(LD) -Ttext=0x8000 -nostdlib -o $@ $<
+	$(LD) -Ttext=0x9000 -nostdlib -o $@ $<
 
 $(BOOT2_BIN): $(BOOT2_ELF)
 	@echo "Converting boot2.elf to binary..."
 	$(OBJCOPY) -O binary $< $@
+	@echo "Padding boot2.bin to 2048 bytes..."
+	truncate -s 2048 $@
 
 # FAT12 Driver
 $(FAT12_OBJ): fat12.asm
@@ -172,19 +176,31 @@ $(FAT32_BIN): $(FAT32_ELF)
 	$(OBJCOPY) -O binary $< $@
 
 # Assembly objects (64-bit ELF for kernel)
-%.o: %.asm
-	@echo "Assembling $<..."
+start.o: start.asm
+	@echo "Assembling start.asm..."
 	$(NASM) -f elf64 $< -o $@
 
-# C objects (kernel)
-%.o: %.c
+idt_asm.o: src/idt_asm.asm
+	@echo "Assembling src/idt_asm.asm..."
+	$(NASM) -f elf64 $< -o $@
+
+syscall_asm.o: src/syscall_asm.asm
+	@echo "Assembling src/syscall_asm.asm..."
+	$(NASM) -f elf64 $< -o $@
+
+# C objects (kernel) - compile to root directory like build.sh
+kernel.o: kernel.c
+	@echo "Compiling kernel.c..."
+	$(CC) $(CFLAGS) -c $< -o $@
+
+%.o: src/%.c
 	@echo "Compiling $<..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Kernel ELF
-$(KERNEL_ELF): $(ALL_OBJECTS)
+# Kernel ELF - link in same order as build.sh
+$(KERNEL_ELF): start.o kernel.o $(C_OBJECTS) idt_asm.o syscall_asm.o
 	@echo "Linking kernel.elf..."
-	$(LD) $(LDFLAGS) -o $@ $(ALL_OBJECTS)
+	$(LD) $(LDFLAGS) -o $@ start.o kernel.o $(filter-out kernel.o,$(C_OBJECTS)) idt_asm.o syscall_asm.o
 
 # Run in QEMU
 run: clean build disk
