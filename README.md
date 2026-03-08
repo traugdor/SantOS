@@ -265,11 +265,18 @@ All filesystem drivers support:
 ## Requirements
 
 ### Build Tools
-- **NASM** (Netwide Assembler)
-- **x86_64-elf-gcc** (cross-compiler)
-- **x86_64-elf-ld** (cross-linker)
-- **objcopy** (binary conversion)
-- **make** (build system)
+- **NASM** (Netwide Assembler) - for assembling bootloader and kernel assembly files
+- **x86_64-elf-gcc** (cross-compiler) - GCC configured for x86_64-elf target
+  - Required for compiling freestanding 64-bit code without host OS dependencies
+  - Must be a cross-compiler, not your system's native gcc
+  - Installation:
+    - **Linux/macOS**: Build from source or use package manager (e.g., `brew install x86_64-elf-gcc`)
+    - **Windows (MSYS2)**: `pacman -S mingw-w64-x86_64-gcc`
+    - **From source**: Follow [OSDev Wiki GCC Cross-Compiler guide](https://wiki.osdev.org/GCC_Cross-Compiler)
+  - The Makefile will look for `x86_64-elf-gcc` in PATH or `./cross/bin/`
+- **x86_64-elf-ld** (cross-linker) - linker from the same toolchain
+- **x86_64-elf-objcopy** (binary conversion) - for extracting binary from ELF
+- **make** (GNU Make) - build system automation
 
 ### Disk Tools
 - **mkfs.vfat** (FAT filesystem creation)
@@ -279,7 +286,7 @@ All filesystem drivers support:
 ### Testing
 - **QEMU** (qemu-system-x86_64)
 - **GDB** (optional, for debugging)
-- **VirtualBox** (optional, alternative to QEMU) (WIP)
+- **VirtualBox** (optional, alternative to QEMU) (WIP) (Doesn't actually run yet and idk why.)
 
 ## Development Notes
 
