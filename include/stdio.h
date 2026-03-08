@@ -23,14 +23,26 @@ int puts(const char* str);                  // Write string with newline
 // Screen control
 void clear_screen(void);                    // Clear the screen
 void set_color(unsigned char fg, unsigned char bg);  // Set text color
+void set_cursor_pos(unsigned char x, unsigned char y);  // Set cursor position
 
 // Filesystem operations
 int list_dir(void);                         // List root directory
 int list_dir_cluster(unsigned short cluster);  // List specific directory by cluster
 unsigned short find_entry(unsigned short dir_cluster, const char* name, int* is_directory);  // Find entry in directory
 
+// File I/O
+int read_file(const char* filename, char* buffer, int buffer_size);  // Read file contents
+int create_file(const char* filename);  // Create an empty file
+int write_file(const char* filename, const char* buffer, int size);  // Write buffer to file
+
+// Special key codes (returned by getchar for non-ASCII keys)
+#define KEY_LEFT  0x01
+#define KEY_RIGHT 0x02
+#define KEY_UP    0x03
+#define KEY_DOWN  0x04
+
 // Program execution
-int exec_program(const char* filename);     // Execute a program file
+int exec_program(const char* filename, int argc, char** argv);  // Execute a program file with arguments
 
 // VGA Color constants
 #define COLOR_BLACK         0

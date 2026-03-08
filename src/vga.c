@@ -78,6 +78,11 @@ void vga_putchar(char c) {
             cursor_x--;
             vga_buffer[cursor_y * VGA_WIDTH + cursor_x] = vga_entry(' ', current_color);
         }
+    } else if (c == 0x1D) {
+        // Non-destructive cursor left - move cursor without erasing
+        if (cursor_x > 0) {
+            cursor_x--;
+        }
     } else if (c == '\t') {
         cursor_x = (cursor_x + 4) & ~(4 - 1); // Align to 4
     } else if (c >= 32 && c <= 126) {
@@ -131,4 +136,12 @@ void vga_enable_cursor(uint8_t start, uint8_t end) {
 void vga_disable_cursor(void) {
     outb(0x3D4, 0x0A);
     outb(0x3D5, 0x20);
+}
+
+void vga_set_cursor_pos(uint8_t x, uint8_t y) {
+    if (x >= VGA_WIDTH) x = VGA_WIDTH - 1;
+    if (y >= VGA_HEIGHT) y = VGA_HEIGHT - 1;
+    cursor_x = x;
+    cursor_y = y;
+    vga_update_cursor();
 }

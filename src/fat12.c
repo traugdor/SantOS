@@ -561,22 +561,22 @@ int fat12_read(fat12_file_t* file, uint8_t* buffer, uint32_t size) {
     
     uint32_t bytes_read = 0;
     uint16_t cluster = file->first_cluster;
-    uint8_t sector_buffer[512];
     
     while (bytes_read < size && cluster >= 2 && cluster < 0xFF8) {
         // Calculate sector from cluster
         uint32_t sector = data_start_sector + ((cluster - 2) * boot_sector.sectors_per_cluster);
         
-        // Read cluster
-        for (int i = 0; i < boot_sector.sectors_per_cluster && bytes_read < size; i++) {
-            if (fdc_read_sectors(sector + i, 1, sector_buffer) != 0) {
-                return -1;
-            }
-            
-            uint32_t to_copy = (size - bytes_read > 512) ? 512 : (size - bytes_read);
-            for (uint32_t j = 0; j < to_copy; j++) {
-                buffer[bytes_read++] = sector_buffer[j];
-            }
+        // Read entire cluster at once (1 cluster = sectors_per_cluster sectors)
+        uint8_t cluster_buffer[512 * 2]; // FAT12 clusters are typically 1-2 sectors
+        if (fdc_read_sectors(sector, boot_sector.sectors_per_cluster, cluster_buffer) != 0) {
+            return -1;
+        }
+        
+        // Copy data from cluster buffer to output buffer
+        uint32_t cluster_size = boot_sector.sectors_per_cluster * 512;
+        uint32_t to_copy = (size - bytes_read > cluster_size) ? cluster_size : (size - bytes_read);
+        for (uint32_t j = 0; j < to_copy; j++) {
+            buffer[bytes_read++] = cluster_buffer[j];
         }
         
         // Get next cluster from FAT

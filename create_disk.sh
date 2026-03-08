@@ -29,19 +29,29 @@ for elf_file in programs/*.elf; do
         # Get uppercase filename for FAT12
         base_name=$(basename "$elf_file")
         upper_name=$(echo "$base_name" | tr '[:lower:]' '[:upper:]')
+        # Strip .ELF extension from SEDIT
+        if [ "$upper_name" = "SEDIT.ELF" ]; then
+            upper_name="SEDIT"
+        fi
         mcopy -i disk.img "$elf_file" "::/$(echo $upper_name)"
         echo "  Copied $upper_name"
     fi
 done
 
 echo "Creating test file..."
-cat > test.txt << 'EOF'
-Hello from SantOS filesystem!
-This file was read from the FAT12 disk.
-If you can see this, the filesystem driver works!
+cat > test.sh << 'EOF'
+##/sosh
+echo This is a test of the scripting system.
+$VAR1="Test Value"
+echo $VAR1
+$VAR2=5
+echo VAR2: $VAR2
+add $VAR2 5
+echo Added 5 to VAR2: $VAR2
 EOF
 
-mcopy -i disk.img test.txt ::/TEST.TXT
+mcopy -i disk.img test.sh ::/TEST.SH
+mcopy -i disk.img story.txt ::/STORY.TXT
 
 echo -e "\nFiles on disk:"
 mdir -i disk.img ::
@@ -64,7 +74,8 @@ rm -f "$BPB_TEMP"  # Clean up
 echo -e "\n✓ boot.bin at sector 0 (with BPB preserved)"
 echo "✓ boot2.bin in FAT filesystem as /BOOT2.BIN"
 echo "✓ kernel.elf in FAT filesystem as /KERNEL.ELF"
-echo "✓ test.txt in FAT filesystem as /TEST.TXT"
+echo "✓ test.sh in FAT filesystem as /TEST.SH"
+echo "✓ story.txt in FAT filesystem as /STORY.TXT"
 
 # Create hexdump with LBA and CHS numbers for disk image debugging
 hexdump -vC disk.img | awk '

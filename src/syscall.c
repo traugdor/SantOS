@@ -40,6 +40,11 @@ uint64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uin
             vga_set_color((uint8_t)arg1, (uint8_t)arg2);  // fg, bg
             result = 0;
             break;
+            
+        case SYSCALL_SET_CURSOR:
+            vga_set_cursor_pos((uint8_t)arg1, (uint8_t)arg2);  // x, y
+            result = 0;
+            break;
         
         // Memory syscalls
         case SYSCALL_MALLOC:
@@ -96,6 +101,58 @@ uint64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uin
         case SYSCALL_FIND_ENTRY:
             result = (uint64_t)fat12_find_entry((uint16_t)arg1, (const char*)arg2, (int*)arg3);
             break;
+            
+        // File read syscall - reads entire file into buffer
+        // arg1 = filename, arg2 = buffer, arg3 = buffer size
+        // Returns bytes read, or 0 on error
+        case SYSCALL_READ_FILE: {
+            const char* fname = (const char*)arg1;
+            uint8_t* buf = (uint8_t*)arg2;
+            uint32_t buf_size = (uint32_t)arg3;
+            
+            fat12_file_t file;
+            if (fat12_open(fname, &file) != 0) {
+                result = 0;
+                break;
+            }
+            
+            uint32_t to_read = file.size < buf_size ? file.size : buf_size;
+            int bytes = fat12_read(&file, buf, to_read);
+            result = (uint64_t)(bytes > 0 ? bytes : 0);
+            break;
+        }
+        
+        // File create syscall - creates an empty file
+        // arg1 = filename
+        // Returns 0 on success, -1 on error
+        case SYSCALL_CREATE_FILE: {
+            const char* fname = (const char*)arg1;
+            fat12_file_t file;
+            result = (uint64_t)(int64_t)fat12_create(fname, &file);
+            break;
+        }
+        
+        // File write syscall - writes buffer to existing file
+        // arg1 = filename, arg2 = buffer, arg3 = size
+        // Returns bytes written, or 0 on error
+        case SYSCALL_WRITE_FILE: {
+            const char* fname = (const char*)arg1;
+            const uint8_t* buf = (const uint8_t*)arg2;
+            uint32_t size = (uint32_t)arg3;
+            
+            fat12_file_t file;
+            if (fat12_open(fname, &file) != 0) {
+                // File doesn't exist - try to create it
+                if (fat12_create(fname, &file) != 0) {
+                    result = 0;
+                    break;
+                }
+            }
+            
+            int bytes = fat12_write(&file, buf, size);
+            result = (uint64_t)(bytes > 0 ? bytes : 0);
+            break;
+        }
         
         // Program load syscall - loads ELF and returns entry point
         // Does NOT execute - caller must invoke the entry point from userspace

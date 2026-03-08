@@ -10,6 +10,7 @@
 #define SYSCALL_PRINTF    2
 #define SYSCALL_CLEAR     3
 #define SYSCALL_SET_COLOR 4
+#define SYSCALL_SET_CURSOR 5
 
 // System call numbers - Memory
 #define SYSCALL_MALLOC   10
@@ -29,6 +30,11 @@
 #define SYSCALL_LIST_DIR    30
 #define SYSCALL_LIST_DIR_CLUSTER 31
 #define SYSCALL_FIND_ENTRY  32
+
+// System call numbers - File I/O
+#define SYSCALL_READ_FILE   33
+#define SYSCALL_CREATE_FILE 34
+#define SYSCALL_WRITE_FILE  35
 
 // System call numbers - Program execution
 #define SYSCALL_EXEC_PROGRAM 40

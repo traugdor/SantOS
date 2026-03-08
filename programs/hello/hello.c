@@ -90,7 +90,7 @@ void proto_spell_checker(void)
     }
 }
 
-int main(void) {
+int main(int argc, char** argv) {
     int input;
     do 
     {

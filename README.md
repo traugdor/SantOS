@@ -1,6 +1,6 @@
 # SantOS - x86_64 Operating System
 
-A complete x86_64 operating system with multi-stage bootloader, FAT12 filesystem support, a 64-bit kernel with heap allocation, system call interface, and an interactive shell.
+A complete x86_64 operating system with multi-stage bootloader, FAT12 filesystem support, a 64-bit kernel with heap allocation, system call interface, interactive shell, and full-featured text editor.
 
 ## Features
 
@@ -32,12 +32,36 @@ A complete x86_64 operating system with multi-stage bootloader, FAT12 filesystem
   - Virtual memory manager (paging) with dynamic mapping up to 1GB
   - Kernel heap (malloc/free/realloc/calloc)
 - **System call interface**: INT 0x80 for kernel-userspace communication
-- **Program loader**: Loads and executes flat binary programs from FAT12 filesystem
+- **ELF Program loader**: Loads and executes 64-bit ELF programs from FAT12 filesystem
+  - Parses ELF headers and program segments
+  - Loads programs at 5MB (0x500000)
+  - Provides dedicated stack at 7MB (0x700000)
+  - Supports command-line arguments (argc/argv)
+  - Zeroes BSS section automatically
 
-### Userspace
-- **Interactive shell** (SantOS Shell v1.0): Command prompt with keyboard input
+### Userspace Programs
+- **SantOS Shell v1.0**: Full-featured command interpreter
+  - Built-in commands (ls, cat, read, echo, help, clear)
+  - Program execution with arguments
+  - Script execution (##/sosh)
+  - Environment variables with arithmetic operations
+  - Command piping (cat | read, ls | read)
+  - Command history (10 commands)
+  - Inline editing with arrow keys
+- **SEdit v1.0.0**: Complete text editor
+  - File operations (open, edit, save)
+  - Vertical and horizontal scrolling
+  - Truncation indicators for long lines
+  - Status bar with version, filename, position, shortcuts
+  - Ctrl+S save, Ctrl+Q quit
+  - Supports up to 1000 lines, 256 chars per line
+- **Hello v1.0**: Example program
+  - Interactive calculator (4 operations)
+  - Prototype spell checker (50-word dictionary)
+  - Demonstrates userspace capabilities
 - **System call wrappers**: Userspace libraries for stdio, stdlib, and string functions
 - **Separate build system**: Programs built independently and linked with syscall libraries
+- **ELF format**: All programs are 64-bit ELF executables
 
 ## Building
 
@@ -59,8 +83,11 @@ This creates a 1.44MB FAT12 floppy disk image (`disk.img`) with:
 - FAT12.SYS filesystem driver
 - BOOT2.BIN second-stage loader
 - KERNEL.ELF 64-bit kernel
-- SHELL.BIN interactive shell program (WIP)
-- TEST.TXT sample file
+- SHELL.ELF interactive shell (loads at 1MB)
+- SEDIT text editor (no extension for cleaner UI)
+- HELLO.ELF example program
+- TEST.SH sample script
+- STORY.TXT sample text file
 
 ## Running
 
@@ -127,11 +154,18 @@ bootloader/
 └── programs/           # Userspace programs
     ├── Makefile        # Programs build system
     ├── lib/            # Userspace syscall libraries
-    │   ├── stdio.c    # printf, putchar, getchar
+    │   ├── stdio.c    # printf, putchar, getchar, exec_program
     │   ├── stdlib.c   # malloc, free, realloc, calloc
     │   └── string.c   # strlen, strcmp, strcpy, memcpy, etc.
-    └── shell/          # Interactive shell
-        └── shell.c    # SantOS Shell v1.0
+    ├── shell/          # Interactive shell
+    │   ├── shell.c    # SantOS Shell v1.0
+    │   └── Readme.MD  # Shell documentation
+    ├── sedit/          # Text editor
+    │   ├── SEdit.c    # SEdit v1.0.0
+    │   └── Readme.MD  # Editor documentation
+    └── hello/          # Example program
+        ├── hello.c    # Calculator & spell checker
+        └── Readme.MD  # Program documentation
 ```
 
 ## Technical Details
@@ -139,14 +173,18 @@ bootloader/
 ### Memory Layout
 - `0x7C00`: Stage 1 bootloader (512 bytes)
 - `0x7E00`: Stage 1.5 filesystem driver (512 bytes)
+- `0x8000`: DMA buffer for floppy disk transfers
 - `0x9000`: Stage 2 bootloader (boot2.bin, 2KB)
 - `0x20000`: Kernel ELF file (loaded by FAT driver)
-- `0x100000`: Userspace program load address
-- `0x200000`: Kernel execution address (copied from ELF)
+- `0x100000`: Shell program (SHELL.ELF, 1MB)
+- `0x200000`: Kernel execution address (copied from ELF, 2MB)
+- `0x500000`: Userspace programs load address (5MB)
+- `0x700000`: Userspace program stack (7MB, grows down)
 - `0x1000-0x3FFF`: Page tables (PML4, PDPT, PD)
 - `0x80000`: Kernel stack (16KB)
 - `0x90000`: Boot stack
 - `0xB8000`: VGA text mode buffer
+- `0x1000000`: Kernel heap (16MB+)
 - Dynamic page tables map up to 1GB based on E820 memory map
 
 ### Boot Process
@@ -164,32 +202,43 @@ bootloader/
    - Parses ELF header and copies kernel to 0x200000
    - Jumps to kernel entry point
 5. **Kernel** initializes hardware, filesystem, heap, and syscall interface
-6. **Shell** loaded from SHELL.BIN and executed via program loader
+6. **Shell** loaded from SHELL.ELF and executed at 1MB
+7. **User programs** can be executed from shell (./SEdit, ./hello, etc.)
 
 ### System Call Interface
 Userspace programs communicate with the kernel via `INT 0x80`:
 
 | Syscall | Number | Description |
 |---------|--------|-------------|
-| PUTCHAR | 0 | Write character to screen |
-| GETCHAR | 1 | Read character from keyboard |
-| PRINTF  | 2 | Print formatted string |
-| MALLOC  | 3 | Allocate heap memory |
-| FREE    | 4 | Free heap memory |
-| REALLOC | 5 | Reallocate heap memory |
-| CALLOC  | 6 | Allocate zeroed memory |
-| STRLEN  | 10 | String length |
-| STRCMP  | 11 | String compare |
-| STRCPY  | 12 | String copy |
-| STRCAT  | 13 | String concatenate |
-| MEMCPY  | 14 | Memory copy |
-| MEMSET  | 15 | Memory set |
+| PUTCHAR | 1 | Write character to screen |
+| GETCHAR | 2 | Read character from keyboard |
+| PRINTF  | 3 | Print formatted string |
+| CLEAR   | 4 | Clear screen |
+| SET_CURSOR | 5 | Set VGA cursor position |
+| SET_COLOR | 6 | Set VGA text colors |
+| MALLOC  | 10 | Allocate heap memory |
+| FREE    | 11 | Free heap memory |
+| REALLOC | 12 | Reallocate heap memory |
+| CALLOC  | 13 | Allocate zeroed memory |
+| STRLEN  | 20 | String length |
+| STRCMP  | 21 | String compare |
+| STRCPY  | 22 | String copy |
+| STRCAT  | 23 | String concatenate |
+| MEMCPY  | 24 | Memory copy |
+| MEMSET  | 25 | Memory set |
+| LIST_DIR | 30 | List root directory |
+| LIST_DIR_CLUSTER | 31 | List directory by cluster |
+| FIND_ENTRY | 32 | Find directory entry |
+| READ_FILE | 33 | Read file from filesystem |
+| CREATE_FILE | 34 | Create new file |
+| WRITE_FILE | 35 | Write file to filesystem |
+| EXEC_PROGRAM | 40 | Load and execute ELF program |
 
 ### Long Mode Transition
 1. Enable A20 line (BIOS and keyboard controller methods)
 2. Check CPUID support
 3. Check long mode support (CPUID extended function)
-4. Setup identity-mapped page tables (8MB mapped)
+4. Setup identity-mapped page tables
 5. Load 32-bit GDT and enter protected mode
 6. Enable PAE (CR4.PAE = 1)
 7. Load CR3 with PML4 address

@@ -39,6 +39,10 @@ void set_color(unsigned char fg, unsigned char bg) {
     do_syscall(SYSCALL_SET_COLOR, (uint64_t)fg, (uint64_t)bg, 0);
 }
 
+void set_cursor_pos(unsigned char x, unsigned char y) {
+    do_syscall(SYSCALL_SET_CURSOR, (uint64_t)x, (uint64_t)y, 0);
+}
+
 int list_dir(void) {
     return (int)do_syscall(SYSCALL_LIST_DIR, 0, 0, 0);
 }
@@ -51,6 +55,18 @@ unsigned short find_entry(unsigned short dir_cluster, const char* name, int* is_
     return (unsigned short)do_syscall(SYSCALL_FIND_ENTRY, (uint64_t)dir_cluster, (uint64_t)name, (uint64_t)is_directory);
 }
 
+int read_file(const char* filename, char* buffer, int buffer_size) {
+    return (int)do_syscall(SYSCALL_READ_FILE, (uint64_t)filename, (uint64_t)buffer, (uint64_t)buffer_size);
+}
+
+int create_file(const char* filename) {
+    return (int)do_syscall(SYSCALL_CREATE_FILE, (uint64_t)filename, 0, 0);
+}
+
+int write_file(const char* filename, const char* buffer, int size) {
+    return (int)do_syscall(SYSCALL_WRITE_FILE, (uint64_t)filename, (uint64_t)buffer, (uint64_t)size);
+}
+
 // Call program with a dedicated stack at a fixed memory address
 // Memory layout:
 //   0x100000 (1MB)  - Shell code
@@ -59,31 +75,29 @@ unsigned short find_entry(unsigned short dir_cluster, const char* name, int* is_
 //   0x700000 (7MB)  - Program stack top (grows down toward 6MB)
 //   0x800000 (8MB)  - Physical memory manager
 //   0x1000000 (16MB) - Kernel heap
-static void call_with_new_stack(uint64_t entry_point) {
+static void call_with_new_stack(uint64_t entry_point, int argc, char** argv) {
     __asm__ volatile(
         "mov %%rsp, %%r15\n"            // Save current stack in r15
         "movabs $0x700000, %%rsp\n"     // Switch to program stack at 7MB
+        "mov %1, %%rdi\n"              // argc in rdi (1st arg)
+        "mov %2, %%rsi\n"              // argv in rsi (2nd arg)
         "call *%0\n"                    // Call program
         "mov %%r15, %%rsp\n"            // Restore original stack
         :
-        : "r"(entry_point)
+        : "r"(entry_point), "r"((uint64_t)argc), "r"((uint64_t)argv)
         : "r15", "rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "memory"
     );
 }
 
-int exec_program(const char* filename) {
+int exec_program(const char* filename, int argc, char** argv) {
     // Syscall loads the ELF and returns the entry point address (0 = error)
     uint64_t entry_point = (uint64_t)do_syscall(SYSCALL_EXEC_PROGRAM, (uint64_t)filename, 0, 0);
     if (entry_point == 0) {
         return -1;  // Failed to load
     }
     
-    printf("DEBUG: About to call program at 0x%x\n", (uint32_t)entry_point);
-    
-    // Call program with dedicated stack
-    call_with_new_stack(entry_point);
-    
-    printf("DEBUG: Program returned successfully\n");
+    // Call program with dedicated stack, passing argc and argv
+    call_with_new_stack(entry_point, argc, argv);
     
     // Program exited successfully
     printf("\nProgram exited.\n");

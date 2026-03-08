@@ -36,21 +36,6 @@ reset_disk:
     jc reset_disk
 
 ; --------------------
-; Display first message
-    mov si, bootloader_started
-    call print_string
-
-; --------------------
-; Display second message
-    mov si, disk_reset
-    call print_string
-
-; --------------------
-; Display third message
-    mov si, loading_os
-    call print_string
-
-; --------------------
 ; Enable A20 line (required for x86_64)
     call enable_a20
 
@@ -219,12 +204,6 @@ enable_a20:
     test al, 1
     jz .wait_output
     ret
-
-; --------------------
-; Messages to display
-bootloader_started  db "Bootloader started!", 0
-disk_reset          db 0x0D, 0x0A, "Disk reset!", 0
-loading_os          db 0x0D, 0x0A, "Loading OS...", 0
 
 ; FAT12 8.3 filenames (11 bytes each, padded with spaces)
 filename_fat12      db "FAT12   SYS"

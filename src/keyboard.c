@@ -66,30 +66,67 @@ static const char scancode_to_ascii_shift[] = {
 };
 
 static int shift_pressed = 0;
+static int ctrl_pressed = 0;
+static int e0_prefix = 0;  // Track extended scancode prefix (0xE0)
 
 // Keyboard interrupt handler (called from assembly)
 void keyboard_handler(void) {
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
     
+    // Handle extended scancode prefix
+    if (scancode == 0xE0) {
+        e0_prefix = 1;
+        return;
+    }
+    
     // Check for shift press/release
     if (scancode == 0x2A || scancode == 0x36) {
         shift_pressed = 1;
+        e0_prefix = 0;
         return;
     }
     if (scancode == 0xAA || scancode == 0xB6) {
         shift_pressed = 0;
+        e0_prefix = 0;
+        return;
+    }
+    
+    // Check for ctrl press/release
+    if (scancode == 0x1D && !e0_prefix) {
+        ctrl_pressed = 1;
+        e0_prefix = 0;
+        return;
+    }
+    if (scancode == 0x9D) {
+        ctrl_pressed = 0;
+        e0_prefix = 0;
         return;
     }
     
     // Ignore key releases (high bit set)
     if (scancode & 0x80) {
+        e0_prefix = 0;
         return;
     }
     
     // Convert scan code to ASCII
     char ascii = 0;
-    if (scancode < sizeof(scancode_to_ascii)) {
-        if (shift_pressed && scancode < sizeof(scancode_to_ascii_shift)) {
+    
+    // Handle extended keys (arrow keys use E0 prefix)
+    if (e0_prefix) {
+        e0_prefix = 0;
+        if (scancode == 0x4B) { ascii = 0x01; }       // Left arrow
+        else if (scancode == 0x4D) { ascii = 0x02; }   // Right arrow
+        else if (scancode == 0x48) { ascii = 0x03; }   // Up arrow
+        else if (scancode == 0x50) { ascii = 0x04; }   // Down arrow
+    } else if (scancode < sizeof(scancode_to_ascii)) {
+        if (ctrl_pressed) {
+            // Ctrl+letter generates ASCII 1-26 (control characters)
+            char base = scancode_to_ascii[scancode];
+            if (base >= 'a' && base <= 'z') {
+                ascii = base - 'a' + 1;  // Ctrl+A=1, Ctrl+Q=17, Ctrl+S=19
+            }
+        } else if (shift_pressed && scancode < sizeof(scancode_to_ascii_shift)) {
             ascii = scancode_to_ascii_shift[scancode];
         } else {
             ascii = scancode_to_ascii[scancode];

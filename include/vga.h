@@ -35,5 +35,6 @@ void vga_scroll(void);
 void vga_update_cursor(void);
 void vga_enable_cursor(uint8_t start, uint8_t end);
 void vga_disable_cursor(void);
+void vga_set_cursor_pos(uint8_t x, uint8_t y);
 
 #endif

@@ -69,10 +69,10 @@ static uint8_t* dma_buffer = (uint8_t*)DMA_BUFFER_ADDR;
 // FDC interrupt flag
 static volatile int fdc_irq_received = 0;
 
-// Setup DMA for floppy read
-static void dma_setup_read(void) {
+// Setup DMA for floppy read (supports multi-sector reads)
+static void dma_setup_read(uint8_t sector_count) {
     uintptr_t addr = (uintptr_t)dma_buffer;
-    uint16_t count = 512 - 1; // Count is length - 1
+    uint16_t count = (sector_count * 512) - 1; // Count is length - 1
     
     // Disable DMA channel 2
     outb(DMA_SINGLE_MASK, 0x06); // Mask channel 2
@@ -98,10 +98,10 @@ static void dma_setup_read(void) {
     outb(DMA_SINGLE_MASK, 0x02); // Unmask channel 2
 }
 
-// Setup DMA for floppy write
-static void dma_setup_write(void) {
+// Setup DMA for floppy write (supports multi-sector writes)
+static void dma_setup_write(uint8_t sector_count) {
     uintptr_t addr = (uintptr_t)dma_buffer;
-    uint16_t count = 512 - 1; // Count is length - 1
+    uint16_t count = (sector_count * 512) - 1; // Count is length - 1
     
     // Disable DMA channel 2
     outb(DMA_SINGLE_MASK, 0x06); // Mask channel 2
@@ -275,72 +275,54 @@ int fdc_init(void) {
     return 0;
 }
 
-// Read sectors with DMA
+// Read sectors with DMA (optimized for multi-sector reads)
 int fdc_read_sectors(uint32_t lba, uint8_t count, uint8_t* buffer) {
-    for (uint8_t i = 0; i < count; i++) {
-        uint8_t cylinder, head, sector;
-        lba_to_chs(lba + i, &cylinder, &head, &sector);
+    uint8_t done = 0;
+    
+    while (done < count) {
+        uint8_t c, h, s;
+        lba_to_chs(lba + done, &c, &h, &s);
+        
+        // Read up to end of track
+        uint8_t n = SECTORS_PER_TRACK - s + 1;
+        if (n > count - done) n = count - done;
         
         fdc_motor_on();
+        if (fdc_seek(c, h) != 0) { fdc_motor_off(); return -1; }
         
-        // Seek to cylinder
-        if (fdc_seek(cylinder, head) != 0) {
-            fdc_motor_off();
-            return -1;
-        }
-        
-        // Setup DMA for read
-        dma_setup_read();
-        
-        // Reset IRQ flag
+        dma_setup_read(n);
         fdc_irq_received = 0;
         
-        // Read command (MT=0, MFM=1, SK=0)
-        if (fdc_write_byte(FDC_CMD_READ_DATA | 0x40) != 0) {
-            fdc_motor_off();
-            return -1;
-        }
-        if (fdc_write_byte((head << 2) | 0) != 0) return -1; // Drive 0
-        if (fdc_write_byte(cylinder) != 0) return -1;
-        if (fdc_write_byte(head) != 0) return -1;
-        if (fdc_write_byte(sector) != 0) return -1;
-        if (fdc_write_byte(2) != 0) return -1; // 512 bytes per sector
-        if (fdc_write_byte(SECTORS_PER_TRACK) != 0) return -1;
-        if (fdc_write_byte(0x1B) != 0) return -1; // GAP3 length
-        if (fdc_write_byte(0xFF) != 0) return -1; // Data length
-        
-        // Wait for operation to complete (polling instead of IRQ for simplicity)
-        uint32_t timeout = 1000000;
-        while (timeout-- && (inb(FDC_MSR) & MSR_BUSY));
-        
-        if (timeout == 0) {
+        if (fdc_write_byte(FDC_CMD_READ_DATA | 0x40) != 0 ||
+            fdc_write_byte((h << 2)) != 0 ||
+            fdc_write_byte(c) != 0 ||
+            fdc_write_byte(h) != 0 ||
+            fdc_write_byte(s) != 0 ||
+            fdc_write_byte(2) != 0 ||
+            fdc_write_byte(s + n - 1) != 0 ||
+            fdc_write_byte(0x1B) != 0 ||
+            fdc_write_byte(0xFF) != 0) {
             fdc_motor_off();
             return -1;
         }
         
-        // Read result bytes (7 bytes)
-        uint8_t st0, st1, st2, cyl, h, sec, bps;
-        if (fdc_read_byte(&st0) != 0) return -1;
-        if (fdc_read_byte(&st1) != 0) return -1;
-        if (fdc_read_byte(&st2) != 0) return -1;
-        if (fdc_read_byte(&cyl) != 0) return -1;
-        if (fdc_read_byte(&h) != 0) return -1;
-        if (fdc_read_byte(&sec) != 0) return -1;
-        if (fdc_read_byte(&bps) != 0) return -1;
+        uint32_t t = 1000000;
+        while (t-- && (inb(FDC_MSR) & MSR_BUSY));
+        if (!t) { fdc_motor_off(); return -1; }
         
-        // Check for errors in ST0
-        if ((st0 & 0xC0) != 0) {
+        uint8_t st0, st1, st2, r[4];
+        if (fdc_read_byte(&st0) | fdc_read_byte(&st1) | fdc_read_byte(&st2) |
+            fdc_read_byte(&r[0]) | fdc_read_byte(&r[1]) | fdc_read_byte(&r[2]) | fdc_read_byte(&r[3])) {
             fdc_motor_off();
             return -1;
         }
         
-        // Copy from DMA buffer to user buffer
-        for (int j = 0; j < 512; j++) {
-            buffer[i * 512 + j] = dma_buffer[j];
-        }
+        if (st0 & 0xC0) { fdc_motor_off(); return -1; }
+        
+        for (int j = 0; j < n * 512; j++) buffer[done * 512 + j] = dma_buffer[j];
+        done += n;
+        fdc_motor_off();
     }
-    
-    fdc_motor_off();
     return 0;
 }
 
@@ -364,7 +346,7 @@ int fdc_write_sectors(uint32_t lba, uint8_t count, const uint8_t* buffer) {
         }
         
         // Setup DMA for write
-        dma_setup_write();
+        dma_setup_write(1);
         
         // Reset IRQ flag
         fdc_irq_received = 0;
