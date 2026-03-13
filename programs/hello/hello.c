@@ -19,6 +19,10 @@ void calculator (void) {
         printf("Enter your choice: ");
         scanf("%d", &choice);
 
+        if (choice == 5) {
+            break;
+        }
+
         int num1, num2;
 
         printf("Enter first number: ");
