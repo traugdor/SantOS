@@ -66,10 +66,10 @@ programs:
 	@$(MAKE) -C programs
 	@echo "✓ Programs built successfully"
 
-bootloader: $(BOOT12_BIN)
+bootloader: $(BOOT12_BIN) $(BOOT16_BIN) $(BOOT32_BIN)
 	@echo "✓ Bootloader built successfully"
 
-stage2: $(BOOT2_BIN) $(FAT12_BIN)
+stage2: $(BOOT2_BIN) $(FAT12_BIN) $(FAT16_BIN) $(FAT32_BIN)
 	@echo "✓ Stage 2 bootloader and FAT drivers built successfully"
 
 kernel: $(KERNEL_ELF)

@@ -57,13 +57,13 @@ static inline uint8_t inb(uint16_t port) {
     return value;
 }
 
-// DMA buffer (must be in low memory, below 16MB)
-// We'll use a fixed address in low memory that we know is safe
-// 0x1000-0x3FFF: Page tables (PML4, PDPT, PD)
-// 0x7C00-0x7DFF: Boot sector
-// 0x7E00-0x7FFF: Stage 1.5 loader
-// 0x8000+: Safe for use
-#define DMA_BUFFER_ADDR 0x8000  // Use memory at 0x8000 (safe location)
+// DMA buffer (must be in low memory, below 16MB, must not cross 64KB boundary)
+// 0x1000-0x3FFF: Page tables (PML4, PDPT, PD) - ACTIVE, do not touch
+// 0x7C00-0x7DFF: Boot sector (no longer needed)
+// 0x7E00-0x81FF: fat12.asm (no longer needed)
+// 0x9000-0x97FF: boot2.asm + GDT - ACTIVE, do not touch!
+// 0x20000+: Old kernel ELF raw data (no longer needed after ELF parsing)
+#define DMA_BUFFER_ADDR 0x20000 // Safe: old kernel ELF area, within ISA DMA range
 static uint8_t* dma_buffer = (uint8_t*)DMA_BUFFER_ADDR;
 
 // FDC interrupt flag
@@ -197,7 +197,11 @@ static int fdc_recalibrate(void) {
     if (fdc_write_byte(FDC_CMD_RECALIBRATE) != 0) return -1;
     if (fdc_write_byte(0) != 0) return -1; // Drive 0
     
-    // Wait for interrupt (skipped for now)
+    // Wait for recalibrate to complete (drive 0 busy bit clears)
+    uint32_t timeout = 1000000;
+    while (timeout-- && (inb(FDC_MSR) & 0x01));
+    if (timeout == 0) return -1;
+    if (fdc_wait_ready() != 0) return -1;
     
     // Sense interrupt
     if (fdc_write_byte(FDC_CMD_SENSE_INTERRUPT) != 0) return -1;
@@ -214,7 +218,11 @@ static int fdc_seek(uint8_t cylinder, uint8_t head) {
     if (fdc_write_byte((head << 2) | 0) != 0) return -1; // Drive 0
     if (fdc_write_byte(cylinder) != 0) return -1;
     
-    // Wait for interrupt (skipped)
+    // Wait for seek to complete (drive 0 busy bit clears)
+    uint32_t timeout = 1000000;
+    while (timeout-- && (inb(FDC_MSR) & 0x01));
+    if (timeout == 0) return -1;
+    if (fdc_wait_ready() != 0) return -1;
     
     // Sense interrupt
     if (fdc_write_byte(FDC_CMD_SENSE_INTERRUPT) != 0) return -1;
@@ -279,6 +287,8 @@ int fdc_init(void) {
 int fdc_read_sectors(uint32_t lba, uint8_t count, uint8_t* buffer) {
     uint8_t done = 0;
     
+    fdc_motor_on();
+    
     while (done < count) {
         uint8_t c, h, s;
         lba_to_chs(lba + done, &c, &h, &s);
@@ -287,7 +297,6 @@ int fdc_read_sectors(uint32_t lba, uint8_t count, uint8_t* buffer) {
         uint8_t n = SECTORS_PER_TRACK - s + 1;
         if (n > count - done) n = count - done;
         
-        fdc_motor_on();
         if (fdc_seek(c, h) != 0) { fdc_motor_off(); return -1; }
         
         dma_setup_read(n);
@@ -321,8 +330,9 @@ int fdc_read_sectors(uint32_t lba, uint8_t count, uint8_t* buffer) {
         
         for (int j = 0; j < n * 512; j++) buffer[done * 512 + j] = dma_buffer[j];
         done += n;
-        fdc_motor_off();
     }
+    
+    fdc_motor_off();
     return 0;
 }
 

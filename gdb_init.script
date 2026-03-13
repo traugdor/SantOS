@@ -5,10 +5,11 @@
 target remote localhost:1234
 
 # Load boot12 symbols
-symbol-file boot12.elf
+add-symbol-file boot12.elf 0x7c00
 
 # Load boot2 symbols
-add-symbol-file boot2.elf 0x8000
+add-symbol-file boot2.elf 0x9000
+add-symbol-file fat12.elf 0x7e00
 
 # Set architecture to i386:x86-64 for proper disassembly
 set architecture i386:x86-64
@@ -16,8 +17,40 @@ set architecture i386:x86-64
 # Set disassembly flavor to Intel syntax
 set disassembly-flavor intel
 
-# Break at the start of boot12
+# Setup register displays
+display /x $rax
+display /x $rbx
+display /x $rcx
+display /x $rdx
+display /x $rsi
+display /x $rdi
+display /x $es
+display /x $ds
+display /x $di
+display /x $si
+
+# Break at the start of boot12, fat12, and boot2
 break *0x7C00
+break *0x7E00
+break *0x9000
+
+# Define custom stepover command for int calls
+define smartstep
+    set $op = *(unsigned char*)$pc
+    if $op == 0xcd
+        set $next = $pc + 2
+        printf "INT instruction detected, stepping over to %p\n", $next
+        tbreak *$next
+        continue
+    else
+        stepi
+    end
+end
+
+alias ss = smartstep
 
 # Continue execution until first breakpoint
 continue
+
+tui enable
+layout regs

@@ -16,6 +16,10 @@ nop
 ; Pad to byte 62 (BPB ends at byte 61, code starts at 62)
 times 62-($-$$) db 0
 
+cylinder db 0
+sector db 0
+head db 0
+
 boot_start:
     cli
     cld
@@ -43,31 +47,28 @@ reset_disk:
 ; Read FAT12.BIN from FAT12 filesystem
 
     ; Load BOOT folder contents directly from LBA 33
-    mov ax, 0x0800
-    mov es, ax
-    xor bx, bx
-    
     mov ax, 33              ; LBA of BOOT folder on FAT12 floppy
     xor dx, dx
-    push bx
     mov bx, 18
     div bx
-    pop bx
-    mov cx, dx
-    inc cx                  ; Sector
-    cwd
-    push bx
+    inc dx
+    mov [sector], dl        ; save 1-based sector number
+    cwd                     ; clear dx
     mov bx, 2
     div bx
-    pop bx
-    mov dh, dl              ; Head
-    shl ah, 6
-    xchg al, ah
-    or cx, ax               ; Cylinder
+    mov [head], dl          ; save 0-based head number
+    mov [cylinder], al      ; save cylinder number
+
+    mov ax, 0x9000
+    mov es, ax
+    xor bx, bx
     
     mov ah, 0x02
     mov al, 1               ; Read 1 sector
     mov dl, 0
+    mov ch, [cylinder]
+    mov cl, [sector]
+    mov dh, [head]
     int 0x13
     jc end
     
@@ -98,30 +99,28 @@ reset_disk:
     ; Load FAT12.BIN to 0x7E00
     mov ax, [es:di + 26]    ; Get cluster
     sub ax, 2
-    add ax, 33              ; Convert to LBA
+    add ax, 33              ; LBA of BOOT folder on FAT12 floppy
     xor dx, dx
-    push bx
     mov bx, 18
     div bx
-    pop bx
-    mov cx, dx
-    inc cx                  ; Sector
-    cwd
-    push bx
+    inc dx
+    mov [sector], dl        ; save 1-based sector number
+    cwd                     ; clear dx
     mov bx, 2
     div bx
-    pop bx
-    mov dh, dl              ; Head
-    shl ah, 6
-    xchg al, ah
-    or cx, ax               ; Cylinder
-    
+    mov [head], dl          ; save 0-based head number
+    mov [cylinder], al      ; save cylinder number
+
     mov ax, 0x0000
     mov es, ax
     mov bx, 0x7E00
+    
     mov ah, 0x02
-    mov al, 1
+    mov al, 2               ; Might need to read more if fat12.bin grows
     mov dl, 0
+    mov ch, [cylinder]
+    mov cl, [sector]
+    mov dh, [head]
     int 0x13
     
     ; Jump to FAT12.BIN
@@ -130,30 +129,6 @@ reset_disk:
 end:
     hlt
     jmp $
-
-; --------------------
-; Function: print a null-terminated string at [SI]
-print_string:
-    mov ah, 0x0E
-.next_char:
-    lodsb
-    cmp al, 0
-    je .done
-    int 0x10
-    jmp .next_char
-.done:
-    ret
-
-; --------------------
-; Print newline
-print_newline:
-    mov al, 0x0D
-    mov ah, 0x0E
-    int 0x10
-    mov al, 0x0A
-    mov ah, 0x0E
-    int 0x10
-    ret
 
 ; --------------------
 ; Enable A20 line using BIOS and keyboard controller

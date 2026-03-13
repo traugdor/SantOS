@@ -39,34 +39,6 @@ search_boot2_bin:
     
     mov si, boot2_filename
     mov cx, 11           ; Compare 11 bytes
-    cld                  ; Clear direction flag for forward comparison
-    ; print es:di all 11 bytes
-    push di
-    ; print new line
-    mov ax, 0x0E00 | 0x0D
-    int 0x10
-    mov ax, 0x0E00 | 0x0A
-    int 0x10
-    .print_filename:
-        mov ah, 0x0e
-        mov al, [es:di]
-        int 0x10
-        inc di
-        dec cx
-        jnz .print_filename
-    mov al, '|'
-    int 0x10
-    push si
-    mov cx, 11
-    .print_dssi:
-        mov al, [ds:si]
-        int 0x10
-        inc si
-        dec cx
-        jnz .print_dssi
-    pop si
-    pop di
-    mov cx, 11
     repe cmpsb           ; Compare [DS:SI] with [ES:DI]
     
     pop cx
@@ -83,11 +55,7 @@ search_boot2_bin:
     jmp .not_found
  
 .not_found:
-    ; Print 'N' for not found and halt
-    mov ax, 0x0E00 | 'N'
-    int 0x10
     jmp $                ; Halt
-
 
 .found_boot2:
     ; Found BOOT2.BIN! Get file size and starting cluster
@@ -132,14 +100,6 @@ search_boot2_bin:
     xchg al, ah
     or cx, ax                   ; Cylinder
 
-    pusha
-    mov ax, 0x0E00 | 'C'
-    mov bx, 0x0000
-    mov cx, 1
-    mov dx, 0x0000
-    int 0x10
-    popa
-
     push es
     push ds
     
@@ -157,12 +117,6 @@ search_boot2_bin:
     pop ds
     pop es
     xor bx, bx
-    
-    ; Debug: Print 'K' to show we reached kernel search
-    pusha
-    mov ax, 0x0E00 | 'K'
-    int 0x10
-    popa
     
 search_kernel_elf:
     ; Initialize directory entry pointer
@@ -182,34 +136,6 @@ search_kernel_elf:
     
     mov si, kernel_elf_filename
     mov cx, 11           ; Compare 11 bytes
-    cld                  ; Clear direction flag for forward comparison
-    ; print es:di all 11 bytes
-    push di
-    ; print new line
-    mov ax, 0x0E00 | 0x0D
-    int 0x10
-    mov ax, 0x0E00 | 0x0A
-    int 0x10
-    .print_filename:
-        mov ah, 0x0e
-        mov al, [es:di]
-        int 0x10
-        inc di
-        dec cx
-        jnz .print_filename
-    mov al, '|'
-    int 0x10
-    push si
-    mov cx, 11
-    .print_dssi:
-        mov al, [ds:si]
-        int 0x10
-        inc si
-        dec cx
-        jnz .print_dssi
-    pop si
-    pop di
-    mov cx, 11
     repe cmpsb           ; Compare [DS:SI] with [ES:DI]
     
     pop cx
@@ -226,11 +152,7 @@ search_kernel_elf:
     jmp .not_found
  
 .not_found:
-    ; Print 'N' for not found and halt
-    mov ax, 0x0E00 | 'N'
-    int 0x10
     jmp $                ; Halt
-
 
 .found_kernel_elf:
     ; Found kernel.elf! Get file size and starting cluster
@@ -315,13 +237,6 @@ search_kernel_elf:
     ; Read sectors
     pop di                  ; DI = total remaining
     pop ax                  ; AX = sectors to read this time
-    
-    ; Debug: Print dot for each loop iteration
-    push ax
-    mov ah, 0x0E
-    mov al, '.'
-    int 0x10
-    pop ax
     
     push di
     push ax

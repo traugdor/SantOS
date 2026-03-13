@@ -316,18 +316,70 @@ long_mode_start:
     mov rsi, msg_loading_kernel
     mov ah, 0x0F
     call print_string_pm
+
+    ; Debug: Show what's at 0x20000
+    mov rdi, 0xB8000 + 1440
+    mov rax, [0x20000]
+    call print_hex
     
-    ; Simple kernel copy - just copy everything from ELF to 0x200000
-    ; ELF is at 0x20000 (loaded by FAT12.asm to 0x2000:0x0000)
-    ; Kernel code starts at offset 0x1000 in ELF
-    ; Copy 128KB to handle larger kernel with syscall support
-    mov rsi, 0x21000        ; Source: ELF base (0x20000) + 0x1000 offset
-    mov rdi, 0x200000       ; Destination: kernel load address
-    mov rcx, 0x20000        ; Copy 128KB
+    ; check for valid ELF header
+    mov rsi, 0x20000
+    mov rax, [rsi]
+    cmp eax, 0x464C457F     ; ELF magic number
+    jne .not_elf
+
+    ; Correct version of finding the program headers
+    xor rax, rax
+    mov eax, [rsi + 0x20]         ; e_phoff (program header offset)
+    movzx r12d, word [rsi + 0x36] ; e_phentsize (program header size) - preserved in r12
+    movzx ebx, word [rsi + 0x38]  ; e_phnum (program header count)
+
+    ; calculate program header address from rsi and rax
+    add rsi, rax
+
+.parse_program_headers:
+    test ebx, ebx
+    jz .done_parsing
+
+    ; check for a LOAD segment
+    mov eax, [rsi]
+    cmp eax, 1
+    jne .next_header ; jump if not
+
+    ; this IS a LOAD segment -- get the info we need
+    mov r13, rsi              ; save program header pointer
+    mov r8, [rsi + 0x08]  ; p_offset
+    mov r9, [rsi + 0x10]  ; p_vaddr
+    mov r10, [rsi + 0x20] ; p_filesz
+    mov r11, [rsi + 0x28] ; p_memsz
+
+    ; copy segment from file to memory
+    mov rdi, r9
+    mov rax, 0x20000
+    add rax, r8
+    mov rsi, rax
+    mov rcx, r10
     rep movsb
+
+    ;zero-fill any remaining memory if memsz > filesz
+    mov rcx, r11
+    sub rcx, r10
+    jz .no_fill
+    mov al, 0
+    rep stosb
     
-    ; Set entry point
-    mov qword [kernel_entry], 0x200000
+.no_fill:
+    mov rsi, r13              ; restore program header pointer
+
+.next_header:
+    add rsi, r12              ; advance by e_phentsize
+    dec ebx
+    jmp .parse_program_headers
+    
+.done_parsing:
+    mov rdi, 0x20000
+    mov rax, [rdi + 0x18]  ; e_entry (entry point)
+    mov [kernel_entry], rax
     
     ; Debug: Show we got past load_kernel
     mov rdi, 0xB8000 + 480
@@ -336,7 +388,7 @@ long_mode_start:
     call print_string_pm
     
     ; Display jumping to kernel message
-    mov rdi, 0xB8000 + 480  ; Fourth line
+    mov rdi, 0xB8000 + 640  ; Fourth line
     mov rsi, msg_jumping_kernel
     mov ah, 0x0E            ; Yellow on black
     call print_string_pm
@@ -365,7 +417,7 @@ long_mode_start:
     mov rax, [kernel_entry]
     mov rbx, [rax]          ; Read first 4 bytes of kernel
     mov rax, rbx
-    mov rdi, 0xB8000 + 1280  ; Line 8
+    mov rdi, 0xB8000 + 1120  ; Line 7
     call print_hex
     
     ; Jump to kernel entry point
@@ -374,6 +426,15 @@ long_mode_start:
     
     ; If kernel returns, halt
     cli
+    jmp .halt_loop
+
+.not_elf:
+    ; Display error message
+    mov rdi, 0xB8000 + 1280 ; Line 8
+    mov rsi, msg_elf_error
+    mov ah, 0x0C
+    call print_string_pm
+    
 .halt_loop:
     hlt
     jmp .halt_loop
@@ -639,11 +700,9 @@ read_disk_lba:
 ; Data
 msg db 'Hello, World from 64-bit long mode!', 0
 msg_success db 'Successfully booted into x86_64 long mode!', 0
-msg_loading_kernel db 'Loading kernel.elf...', 0
+msg_loading_kernel db 'Loading kernel...', 0
 msg_in_load_kernel db 'In load_kernel', 0
 msg_kernel_loaded db 'Kernel loaded!', 0
-msg_before_10000 db 'At 0xFFFE: ', 0
-msg_elf_at_10000 db 'ELF at 0x10000: ', 0
 msg_jumping_kernel db 'Jumping to kernel...', 0
 msg_entry_point db 'Entry: ', 0
 msg_copy_src db 'Copy src: ', 0

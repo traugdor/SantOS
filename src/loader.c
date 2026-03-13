@@ -51,8 +51,9 @@ uint64_t load_program(const char* filename, void* load_addr) {
     
     printf("  File size: %d bytes\n", file.size);
     
-    // Read the entire ELF file into a temporary buffer
-    uint8_t* elf_buffer = (uint8_t*)malloc(file.size);
+    // Read the entire ELF file into a temporary buffer (round up to sector boundary)
+    uint32_t alloc_size = (file.size + 511) & ~511;
+    uint8_t* elf_buffer = (uint8_t*)malloc(alloc_size);
     if (!elf_buffer) {
         printf("ERROR: Failed to allocate memory for ELF file\n");
         return 0;

@@ -212,12 +212,10 @@ int fat12_init(void) {
     uint32_t root_dir_sectors = ((boot_sector.root_entries * 32) + (boot_sector.bytes_per_sector - 1)) / boot_sector.bytes_per_sector;
     data_start_sector = root_dir_start_sector + root_dir_sectors;
     
-    // Read FAT table into memory
-    for (int i = 0; i < boot_sector.sectors_per_fat; i++) {
-        if (fdc_read_sectors(fat_start_sector + i, 1, fat_buffer + (i * 512)) != 0) {
-            printf("Error: Failed to read FAT table\n");
-            return -1;
-        }
+    // Read FAT table into memory (all sectors at once)
+    if (fdc_read_sectors(fat_start_sector, boot_sector.sectors_per_fat, fat_buffer) != 0) {
+        printf("Error: Failed to read FAT table\n");
+        return -1;
     }
     
     // printf("FAT12 initialized:\n");
@@ -561,26 +559,40 @@ int fat12_read(fat12_file_t* file, uint8_t* buffer, uint32_t size) {
     
     uint32_t bytes_read = 0;
     uint16_t cluster = file->first_cluster;
+    uint8_t spc = boot_sector.sectors_per_cluster;
     
     while (bytes_read < size && cluster >= 2 && cluster < 0xFF8) {
-        // Calculate sector from cluster
-        uint32_t sector = data_start_sector + ((cluster - 2) * boot_sector.sectors_per_cluster);
+        // Find run of consecutive clusters
+        uint16_t run_start = cluster;
+        uint16_t run_len = 1;
+        uint16_t next = get_fat_entry(cluster);
+        uint16_t current = cluster;
         
-        // Read entire cluster at once (1 cluster = sectors_per_cluster sectors)
-        uint8_t cluster_buffer[512 * 2]; // FAT12 clusters are typically 1-2 sectors
-        if (fdc_read_sectors(sector, boot_sector.sectors_per_cluster, cluster_buffer) != 0) {
+        while (next == current + 1 && next >= 2 && next < 0xFF8 && run_len < 250) {
+            run_len++;
+            current = next;
+            next = get_fat_entry(current);
+        }
+        
+        // Calculate sectors for this consecutive run
+        uint32_t start_sector = data_start_sector + ((run_start - 2) * spc);
+        uint32_t total_sectors = run_len * spc;
+        
+        // Limit sectors to what we need (round up to full sectors)
+        uint32_t bytes_remaining = size - bytes_read;
+        uint32_t needed_sectors = (bytes_remaining + 511) / 512;
+        if (total_sectors > needed_sectors) total_sectors = needed_sectors;
+        
+        if (fdc_read_sectors(start_sector, (uint8_t)total_sectors, buffer + bytes_read) != 0) {
             return -1;
         }
         
-        // Copy data from cluster buffer to output buffer
-        uint32_t cluster_size = boot_sector.sectors_per_cluster * 512;
-        uint32_t to_copy = (size - bytes_read > cluster_size) ? cluster_size : (size - bytes_read);
-        for (uint32_t j = 0; j < to_copy; j++) {
-            buffer[bytes_read++] = cluster_buffer[j];
-        }
+        uint32_t read_amount = total_sectors * 512;
+        if (read_amount > bytes_remaining) read_amount = bytes_remaining;
+        bytes_read += read_amount;
         
-        // Get next cluster from FAT
-        cluster = get_fat_entry(cluster);
+        // Move to next cluster after the run
+        cluster = next;
     }
     
     return bytes_read;

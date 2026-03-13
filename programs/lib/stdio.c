@@ -90,8 +90,18 @@ static void call_with_new_stack(uint64_t entry_point, int argc, char** argv) {
 }
 
 int exec_program(const char* filename, int argc, char** argv) {
+    // Copy filename to static buffer since caller's pointer may be on stack
+    // and get corrupted during syscall context switch
+    static char filename_buf[256];
+    int i = 0;
+    while (filename[i] && i < 255) {
+        filename_buf[i] = filename[i];
+        i++;
+    }
+    filename_buf[i] = '\0';
+    
     // Syscall loads the ELF and returns the entry point address (0 = error)
-    uint64_t entry_point = (uint64_t)do_syscall(SYSCALL_EXEC_PROGRAM, (uint64_t)filename, 0, 0);
+    uint64_t entry_point = (uint64_t)do_syscall(SYSCALL_EXEC_PROGRAM, (uint64_t)filename_buf, 0, 0);
     if (entry_point == 0) {
         return -1;  // Failed to load
     }

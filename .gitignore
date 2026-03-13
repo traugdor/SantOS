@@ -4,6 +4,7 @@
 
 # Disk and image files
 *.img
+*.elf
 imgdump
 elfdump
 hexdump

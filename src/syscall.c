@@ -174,8 +174,9 @@ uint64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uin
                 break;
             }
             
-            // Read first 4 bytes to check for ELF magic number (0x7F 'E' 'L' 'F')
-            uint8_t header[4];
+            // Read first sector to check for ELF magic number (0x7F 'E' 'L' 'F')
+            // Must be 512 bytes because fdc_read_sectors copies full sectors
+            uint8_t header[512];
             if (fat12_read(&file, header, 4) != 4) {
                 printf("Error: Failed to read file header\n");
                 result = 0;
