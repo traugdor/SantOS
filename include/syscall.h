@@ -39,6 +39,10 @@
 // System call numbers - Program execution
 #define SYSCALL_EXEC_PROGRAM 40
 
+// System call numbers - VGA buffer management
+#define SYSCALL_SAVE_VGA    50
+#define SYSCALL_RESTORE_VGA 51
+
 // System call interface for userspace programs
 int syscall(int num, ...);
 

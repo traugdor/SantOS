@@ -7,6 +7,36 @@
 #include "../include/loader.h"
 #include <stdarg.h>
 
+// I/O port helpers for VGA cursor position
+static inline void outb_vga(uint16_t port, uint8_t value) {
+    __asm__ volatile("outb %0, %1" : : "a"(value), "Nd"(port));
+}
+
+static inline uint8_t inb_vga(uint16_t port) {
+    uint8_t value;
+    __asm__ volatile("inb %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
+// Get current cursor position from VGA hardware
+static void get_cursor_pos(uint8_t* x, uint8_t* y) {
+    uint16_t pos = 0;
+    
+    // Read cursor position from VGA registers
+    outb_vga(0x3D4, 0x0F);  // Low byte
+    pos |= inb_vga(0x3D5);
+    outb_vga(0x3D4, 0x0E);  // High byte
+    pos |= ((uint16_t)inb_vga(0x3D5)) << 8;
+    
+    *x = pos % 80;
+    *y = pos / 80;
+}
+
+// VGA buffer backup (shared between save/restore syscalls)
+static uint16_t vga_backup[2000];  // 80x25 screen buffer
+static uint8_t saved_cursor_x = 0;
+static uint8_t saved_cursor_y = 0;
+
 // Kernel-side system call handler
 // Called from syscall_asm.asm with arguments passed via C calling convention
 uint64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
@@ -150,6 +180,13 @@ uint64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uin
             }
             
             int bytes = fat12_write(&file, buf, size);
+            if (bytes > 0) {
+                // Update directory entry with new file size
+                if (fat12_update_size(fname, (uint32_t)bytes) != 0) {
+                    result = 0;
+                    break;
+                }
+            }
             result = (uint64_t)(bytes > 0 ? bytes : 0);
             break;
         }
@@ -194,6 +231,29 @@ uint64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uin
             
             // Load the program and return the entry point to userspace
             result = load_program(filename, load_addr);
+            break;
+        }
+        
+        // VGA buffer save/restore syscalls
+        case SYSCALL_SAVE_VGA: {
+            uint16_t* vga = (uint16_t*)0xB8000;
+            for (int i = 0; i < 2000; i++) {
+                vga_backup[i] = vga[i];
+            }
+            // Save cursor position
+            get_cursor_pos(&saved_cursor_x, &saved_cursor_y);
+            result = 0;
+            break;
+        }
+        
+        case SYSCALL_RESTORE_VGA: {
+            uint16_t* vga = (uint16_t*)0xB8000;
+            for (int i = 0; i < 2000; i++) {
+                vga[i] = vga_backup[i];
+            }
+            // Restore cursor position
+            vga_set_cursor_pos(saved_cursor_x, saved_cursor_y);
+            result = 0;
             break;
         }
             

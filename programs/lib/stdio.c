@@ -89,6 +89,14 @@ static void call_with_new_stack(uint64_t entry_point, int argc, char** argv) {
     );
 }
 
+void save_vga(void) {
+    do_syscall(SYSCALL_SAVE_VGA, 0, 0, 0);
+}
+
+void restore_vga(void) {
+    do_syscall(SYSCALL_RESTORE_VGA, 0, 0, 0);
+}
+
 int exec_program(const char* filename, int argc, char** argv) {
     // Copy filename to static buffer since caller's pointer may be on stack
     // and get corrupted during syscall context switch
@@ -100,17 +108,24 @@ int exec_program(const char* filename, int argc, char** argv) {
     }
     filename_buf[i] = '\0';
     
+    // Save VGA buffer before launching program
+    save_vga();
+    
     // Syscall loads the ELF and returns the entry point address (0 = error)
     uint64_t entry_point = (uint64_t)do_syscall(SYSCALL_EXEC_PROGRAM, (uint64_t)filename_buf, 0, 0);
     if (entry_point == 0) {
+        restore_vga();  // Restore on load failure
         return -1;  // Failed to load
     }
     
     // Call program with dedicated stack, passing argc and argv
     call_with_new_stack(entry_point, argc, argv);
     
+    // Restore VGA buffer after program exits
+    restore_vga();
+    
     // Program exited successfully
-    printf("\nProgram exited.\n");
+    printf("\n%s exited.\n", filename);
     
     return 0;
 }

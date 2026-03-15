@@ -50,7 +50,7 @@ void calculator (void) {
         } else if (choice > 5){
             printf("Invalid choice\n");
         }
-    }while (choice != 5);
+    } while (choice != 5);
     
 }
 

@@ -1304,6 +1304,45 @@ int process_single_command(char* command) {
         return 0;
     }
 
+    // Try to execute as a program on disk (e.g., "sedit" -> "SEDIT" or "SEDIT.ELF")
+    {
+        // Build uppercased command name
+        char elf_name[256];
+        int ni = 0;
+        while (command_name[ni] && ni < 248) {
+            char c = command_name[ni];
+            if (c >= 'a' && c <= 'z') c -= 32;  // uppercase
+            elf_name[ni] = c;
+            ni++;
+        }
+        elf_name[ni] = '\0';
+
+        // Check if the file exists by trying to read its header
+        // Try bare name first (e.g., "SEDIT"), then with ".ELF" appended
+        char probe[8];
+        int found = 0;
+
+        if (read_file(elf_name, probe, 4) > 0) {
+            found = 1;
+        } else {
+            strcat(elf_name, ".ELF");
+            if (read_file(elf_name, probe, 4) > 0) {
+                found = 1;
+            }
+        }
+
+        if (found) {
+            int result = exec_program(elf_name, argc, args);
+            if (result != 0) {
+                set_color(COLOR_LIGHT_RED, COLOR_BLACK);
+                printf("Error: Failed to execute %s\n", elf_name);
+                set_color(COLOR_WHITE, COLOR_BLACK);
+            }
+            free(command_copy);
+            return result;
+        }
+    }
+
     set_color(COLOR_LIGHT_RED, COLOR_BLACK);
     printf("Unknown command: %s", command_name);
     set_color(COLOR_WHITE, COLOR_BLACK);

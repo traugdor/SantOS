@@ -3,7 +3,7 @@
 #include "../../include/stdlib.h"
 
 int MAJOR = 1;
-int MINOR = 0;
+int MINOR = 1;
 int PATCH = 0;
 
 char VERSION[20] = "";
@@ -432,8 +432,6 @@ int main(int argc, char** argv) {
         // Redraw after every action
         redraw_screen(status_msg);
     }
-
-    clear_screen();
-    printf("%s - exited.\n", VERSION);
+    
     return 0;
 }
