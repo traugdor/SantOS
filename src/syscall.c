@@ -142,13 +142,13 @@ uint64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uin
             
             fat12_file_t file;
             if (fat12_open(fname, &file) != 0) {
-                result = 0;
+                result = (uint64_t)(int64_t)-1;  // Return -1 on error (file not found)
                 break;
             }
             
             uint32_t to_read = file.size < buf_size ? file.size : buf_size;
             int bytes = fat12_read(&file, buf, to_read);
-            result = (uint64_t)(bytes > 0 ? bytes : 0);
+            result = (uint64_t)(int64_t)(bytes >= 0 ? bytes : -1);  // Return actual bytes read (including 0 for empty files) or -1 on read error
             break;
         }
         

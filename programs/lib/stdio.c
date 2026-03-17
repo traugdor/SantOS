@@ -16,7 +16,7 @@ static inline int64_t do_syscall(int num, uint64_t arg1, uint64_t arg2, uint64_t
         "mov %%rax, %0\n"
         : "=r"(result)
         : "r"((uint64_t)num), "r"(arg1), "r"(arg2), "r"(arg3)
-        : "rax", "rdi", "rsi", "rdx"
+        : "rax", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "r10", "r11", "memory"
     );
     return result;
 }
@@ -232,6 +232,123 @@ int printf(const char* fmt, ...) {
         }
         fmt++;
     }
+    
+    __builtin_va_end(args);
+    return count;
+}
+
+// Helper: append character to buffer
+static void buf_putchar(char** buf, char c) {
+    **buf = c;
+    (*buf)++;
+}
+
+// Helper: append string to buffer
+static void buf_print_str(char** buf, const char* s) {
+    while (*s) {
+        buf_putchar(buf, *s++);
+    }
+}
+
+// Helper: append unsigned integer to buffer
+static void buf_print_uint(char** buf, uint64_t val, int base) {
+    char temp[21];
+    int i = 0;
+    
+    if (val == 0) {
+        buf_putchar(buf, '0');
+        return;
+    }
+    
+    while (val > 0) {
+        int digit = val % base;
+        temp[i++] = (digit < 10) ? ('0' + digit) : ('a' + digit - 10);
+        val /= base;
+    }
+    
+    while (i > 0) {
+        buf_putchar(buf, temp[--i]);
+    }
+}
+
+// Helper: append signed integer to buffer
+static void buf_print_int(char** buf, int64_t val) {
+    if (val < 0) {
+        buf_putchar(buf, '-');
+        buf_print_uint(buf, (uint64_t)(-val), 10);
+    } else {
+        buf_print_uint(buf, (uint64_t)val, 10);
+    }
+}
+
+int sprintf(char* str, const char* fmt, ...) {
+    __builtin_va_list args;
+    __builtin_va_start(args, fmt);
+    char* buf = str;
+    int count = 0;
+    
+    while (*fmt) {
+        if (*fmt == '%') {
+            fmt++;
+            switch (*fmt) {
+                case 'c': {
+                    char c = (char)__builtin_va_arg(args, int);
+                    buf_putchar(&buf, c);
+                    count++;
+                    break;
+                }
+                case 's': {
+                    const char* s = __builtin_va_arg(args, const char*);
+                    if (s) buf_print_str(&buf, s);
+                    else buf_print_str(&buf, "(null)");
+                    count++;
+                    break;
+                }
+                case 'd':
+                case 'i': {
+                    int64_t val = __builtin_va_arg(args, int);
+                    buf_print_int(&buf, val);
+                    count++;
+                    break;
+                }
+                case 'u': {
+                    uint64_t val = __builtin_va_arg(args, unsigned int);
+                    buf_print_uint(&buf, val, 10);
+                    count++;
+                    break;
+                }
+                case 'x': {
+                    uint64_t val = __builtin_va_arg(args, unsigned int);
+                    buf_print_uint(&buf, val, 16);
+                    count++;
+                    break;
+                }
+                case 'p': {
+                    void* p = __builtin_va_arg(args, void*);
+                    buf_print_str(&buf, "0x");
+                    buf_print_uint(&buf, (uint64_t)p, 16);
+                    count++;
+                    break;
+                }
+                case '%':
+                    buf_putchar(&buf, '%');
+                    count++;
+                    break;
+                default:
+                    buf_putchar(&buf, '%');
+                    buf_putchar(&buf, *fmt);
+                    count++;
+                    break;
+            }
+        } else {
+            buf_putchar(&buf, *fmt);
+            count++;
+        }
+        fmt++;
+    }
+    
+    // Null-terminate the string
+    *buf = '\0';
     
     __builtin_va_end(args);
     return count;

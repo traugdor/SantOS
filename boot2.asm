@@ -36,6 +36,10 @@ start:
     call print_string_16
     call delay_16
     
+    ; Ensure interrupts are disabled before mode switch
+    ; (BIOS calls above may have re-enabled IF)
+    cli
+
     ; Enter protected mode
     mov eax, cr0
     or eax, 0x1             ; Set PE bit (Protection Enable)
@@ -397,12 +401,6 @@ long_mode_start:
     mov rax, [kernel_entry]
     mov rdi, 0xB8000 + 800  ; Line 5
     call print_hex
-    
-    ; Small delay so we can see the entry point
-    mov rcx, 0x10000000
-.delay:
-    dec rcx
-    jnz .delay
     
     ; Set up stack for kernel (16KB stack at 0x80000)
     mov rsp, 0x80000

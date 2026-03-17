@@ -21,3 +21,7 @@ kernel.elf
 .idea/
 *.swp
 *~
+
+# bochs logs
+-bx.*
+bochsrc.bxrc

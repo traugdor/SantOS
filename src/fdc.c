@@ -1,4 +1,5 @@
 #include "../include/fdc.h"
+#include "../include/idt.h"
 #include "../include/stdio.h"
 
 // FDC I/O Ports
@@ -69,6 +70,23 @@ static uint8_t* dma_buffer = (uint8_t*)DMA_BUFFER_ADDR;
 // FDC interrupt flag
 static volatile int fdc_irq_received = 0;
 
+// FDC interrupt handler (called from fdc_handler_asm in idt_asm.asm)
+void fdc_irq_handler(void) {
+    fdc_irq_received = 1;
+}
+
+// Wait for FDC interrupt with timeout
+static int fdc_wait_irq(void) {
+    for (uint32_t timeout = 10000; timeout > 0; timeout--) {
+        if (fdc_irq_received) {
+            fdc_irq_received = 0;
+            return 0;
+        }
+        __asm__ volatile("sti; hlt");  // Atomically enable interrupts and halt (needed when called from syscall context where IF=0)
+    }
+    return -1;  // Timeout (~10 seconds)
+}
+
 // Setup DMA for floppy read (supports multi-sector reads)
 static void dma_setup_read(uint8_t sector_count) {
     uintptr_t addr = (uintptr_t)dma_buffer;
@@ -129,9 +147,10 @@ static void dma_setup_write(uint8_t sector_count) {
 
 // Wait for FDC to be ready
 static int fdc_wait_ready(void) {
-    uint32_t timeout = 100000;
-    while (timeout-- && !(inb(FDC_MSR) & MSR_RQM));
-    return (timeout > 0) ? 0 : -1;
+    for (uint32_t timeout = 100000; timeout > 0; timeout--) {
+        if (inb(FDC_MSR) & MSR_RQM) return 0;
+    }
+    return -1;
 }
 
 // Send a byte to FDC
@@ -143,11 +162,13 @@ static int fdc_write_byte(uint8_t byte) {
 
 // Read a byte from FDC
 static int fdc_read_byte(uint8_t* byte) {
-    uint32_t timeout = 100000;
-    while (timeout-- && !(inb(FDC_MSR) & MSR_RQM));
-    if (timeout == 0) return -1;
-    *byte = inb(FDC_FIFO);
-    return 0;
+    for (uint32_t timeout = 100000; timeout > 0; timeout--) {
+        if (inb(FDC_MSR) & MSR_RQM) {
+            *byte = inb(FDC_FIFO);
+            return 0;
+        }
+    }
+    return -1;
 }
 
 // Motor control
@@ -165,11 +186,12 @@ static int fdc_reset(void) {
     // Disable controller
     outb(FDC_DOR, 0);
     
-    // Re-enable controller
+    // Clear any stale IRQ flag and re-enable controller
+    fdc_irq_received = 0;
     outb(FDC_DOR, DOR_IRQ | DOR_RESET);
     
-    // Wait for interrupt (we'll skip this for now)
-    // In a real driver, you'd wait for IRQ 6
+    // Wait for reset completion interrupt (IRQ6)
+    if (fdc_wait_irq() != 0) return -1;
     
     // Send SENSE_INTERRUPT for each drive
     for (int i = 0; i < 4; i++) {
@@ -194,14 +216,12 @@ static int fdc_reset(void) {
 static int fdc_recalibrate(void) {
     fdc_motor_on();
     
+    fdc_irq_received = 0;
     if (fdc_write_byte(FDC_CMD_RECALIBRATE) != 0) return -1;
     if (fdc_write_byte(0) != 0) return -1; // Drive 0
     
-    // Wait for recalibrate to complete (drive 0 busy bit clears)
-    uint32_t timeout = 1000000;
-    while (timeout-- && (inb(FDC_MSR) & 0x01));
-    if (timeout == 0) return -1;
-    if (fdc_wait_ready() != 0) return -1;
+    // Wait for recalibrate to complete (IRQ6 fires when done)
+    if (fdc_wait_irq() != 0) return -1;
     
     // Sense interrupt
     if (fdc_write_byte(FDC_CMD_SENSE_INTERRUPT) != 0) return -1;
@@ -214,15 +234,13 @@ static int fdc_recalibrate(void) {
 
 // Seek to a specific cylinder
 static int fdc_seek(uint8_t cylinder, uint8_t head) {
+    fdc_irq_received = 0;
     if (fdc_write_byte(FDC_CMD_SEEK) != 0) return -1;
     if (fdc_write_byte((head << 2) | 0) != 0) return -1; // Drive 0
     if (fdc_write_byte(cylinder) != 0) return -1;
     
-    // Wait for seek to complete (drive 0 busy bit clears)
-    uint32_t timeout = 1000000;
-    while (timeout-- && (inb(FDC_MSR) & 0x01));
-    if (timeout == 0) return -1;
-    if (fdc_wait_ready() != 0) return -1;
+    // Wait for seek to complete (IRQ6 fires when done)
+    if (fdc_wait_irq() != 0) return -1;
     
     // Sense interrupt
     if (fdc_write_byte(FDC_CMD_SENSE_INTERRUPT) != 0) return -1;
@@ -243,31 +261,29 @@ static void lba_to_chs(uint32_t lba, uint8_t* cylinder, uint8_t* head, uint8_t* 
 // Detect if FDC is available
 int fdc_detect(void) {
     // Check if FDC exists by reading the MSR
-    // If all bits are 1 (0xFF), likely no FDC present
+    // If all bits are 1 (0xFF) or 0, likely no FDC present
+    // Do NOT reset the FDC here - that leaves the IRQ line asserted
+    // without a SENSE_INTERRUPT, causing an IRQ storm when IRQ6 is
+    // later unmasked in fdc_init(). The proper reset is done in fdc_init().
     uint8_t msr = inb(FDC_MSR);
-    if (msr == 0xFF) {
-        return 0; // No FDC detected
-    }
-    
-    // Try to reset and see if we get a response
-    outb(FDC_DOR, 0);
-    outb(FDC_DOR, DOR_IRQ | DOR_RESET);
-    
-    // Wait a bit
-    for (volatile int i = 0; i < 10000; i++);
-    
-    // Check if MSR shows ready state
-    msr = inb(FDC_MSR);
     if (msr == 0xFF || msr == 0x00) {
         return 0; // No FDC detected
     }
-    
     return 1; // FDC detected
 }
 
 // Initialize FDC
 int fdc_init(void) {
     printf("Initializing FDC...\n");
+    
+    // Set up FDC interrupt handler (IRQ6 = vector 38)
+    extern void fdc_handler_asm(void);
+    idt_set_gate(38, (uint64_t)fdc_handler_asm, 0x08, 0x8E);
+    
+    // Unmask IRQ6 in PIC
+    uint8_t pic_mask = inb(0x21);
+    pic_mask &= ~(1 << 6);
+    outb(0x21, pic_mask);
     
     if (fdc_reset() != 0) {
         printf("FDC reset failed\n");
@@ -315,9 +331,8 @@ int fdc_read_sectors(uint32_t lba, uint8_t count, uint8_t* buffer) {
             return -1;
         }
         
-        uint32_t t = 1000000;
-        while (t-- && (inb(FDC_MSR) & MSR_BUSY));
-        if (!t) { fdc_motor_off(); return -1; }
+        // Wait for DMA read to complete (IRQ6 fires when done)
+        if (fdc_wait_irq() != 0) { fdc_motor_off(); return -1; }
         
         uint8_t st0, st1, st2, r[4];
         if (fdc_read_byte(&st0) | fdc_read_byte(&st1) | fdc_read_byte(&st2) |
@@ -375,11 +390,8 @@ int fdc_write_sectors(uint32_t lba, uint8_t count, const uint8_t* buffer) {
         if (fdc_write_byte(0x1B) != 0) return -1; // GAP3 length
         if (fdc_write_byte(0xFF) != 0) return -1; // Data length
         
-        // Wait for operation to complete (polling instead of IRQ for simplicity)
-        uint32_t timeout = 1000000;
-        while (timeout-- && (inb(FDC_MSR) & MSR_BUSY));
-        
-        if (timeout == 0) {
+        // Wait for DMA write to complete (IRQ6 fires when done)
+        if (fdc_wait_irq() != 0) {
             fdc_motor_off();
             return -1;
         }

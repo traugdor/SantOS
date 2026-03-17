@@ -146,26 +146,32 @@ static void draw_status_bar(const char* message) {
 
 // Redraw the entire screen
 static void redraw_screen(const char* status_message) {
-    clear_screen();
+    // Do NOT use clear_screen() - it causes visible flashing in VirtualBox
+    // because the VGA refresh catches the blank frame. Instead, overwrite
+    // each line with content padded with spaces.
 
     // Draw visible lines
     for (int screen_y = 0; screen_y < SCREEN_ROWS; screen_y++) {
         set_cursor_pos(0, screen_y);
         int file_row = scroll_row + screen_y;
+        int visible = 0;
         if (file_row < line_count) {
             int len = strlen(lines[file_row]);
             // Print visible portion starting from scroll_col
-            int visible = 0;
             for (int x = scroll_col; x < len && visible < SCREEN_COLS - 1; x++) {
                 putchar(lines[file_row][x]);
                 visible++;
             }
             // Show '>' indicator if line extends beyond visible area
             if (len > scroll_col + SCREEN_COLS - 1) {
-                set_cursor_pos(SCREEN_COLS - 1, screen_y);
+                // Pad up to the last column, then show '>'
+                while (visible < SCREEN_COLS - 1) { putchar(' '); visible++; }
                 putchar('>');
+                visible++;
             }
         }
+        // Pad remainder of line with spaces to clear old content
+        while (visible < SCREEN_COLS) { putchar(' '); visible++; }
     }
 
     // Position cursor at status bar row and draw it
@@ -180,7 +186,7 @@ static void redraw_screen(const char* status_message) {
 static int load_file(const char* fname) {
     char buf[32768];  // 32KB buffer
     int bytes = read_file(fname, buf, sizeof(buf) - 1);
-    if (bytes <= 0) {
+    if (bytes < 0) {
         return -1;
     }
     buf[bytes] = '\0';

@@ -427,7 +427,8 @@ int process_single_command(char* command) {
         char* filename = argv[0];
         
         // Read first 7 bytes to check for script marker "##/sosh"
-        char header[8];
+        // NOTE: buffer must be >= 512 bytes because fat12_read always copies full sectors
+        char header[512];
         int bytes = read_file(filename, header, 7);
         if (bytes <= 0) {
             set_color(COLOR_LIGHT_RED, COLOR_BLACK);
@@ -1238,7 +1239,7 @@ int process_single_command(char* command) {
         }
         
         int bytes = read_file(args[1], stream_buffer, STREAM_BUF_SIZE - 1);
-        if (bytes <= 0) {
+        if (bytes < 0) {
             set_color(COLOR_LIGHT_RED, COLOR_BLACK);
             printf("Error: Failed to read file %s\n", args[1]);
             set_color(COLOR_WHITE, COLOR_BLACK);
@@ -1319,7 +1320,9 @@ int process_single_command(char* command) {
 
         // Check if the file exists by trying to read its header
         // Try bare name first (e.g., "SEDIT"), then with ".ELF" appended
-        char probe[8];
+        // NOTE: probe must be >= 512 bytes because fat12_read/fdc_read_sectors
+        // always copies full sectors even for small reads
+        char probe[512];
         int found = 0;
 
         if (read_file(elf_name, probe, 4) > 0) {
@@ -1332,6 +1335,8 @@ int process_single_command(char* command) {
         }
 
         if (found) {
+            // Set args[0] to the resolved filename (e.g. "SEDIT" instead of "sedit")
+            args[0] = elf_name;
             int result = exec_program(elf_name, argc, args);
             if (result != 0) {
                 set_color(COLOR_LIGHT_RED, COLOR_BLACK);

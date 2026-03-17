@@ -16,7 +16,7 @@ static inline int64_t do_syscall(int num, uint64_t arg1, uint64_t arg2, uint64_t
         "mov %%rax, %0\n"
         : "=r"(result)
         : "r"((uint64_t)num), "r"(arg1), "r"(arg2), "r"(arg3)
-        : "rax", "rdi", "rsi", "rdx"
+        : "rax", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "r10", "r11", "memory"
     );
     return result;
 }
