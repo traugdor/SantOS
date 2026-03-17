@@ -5,10 +5,12 @@ A complete x86_64 operating system with multi-stage bootloader, FAT12 filesystem
 ## Features
 
 ### Bootloader System
-- **Multi-filesystem support**: FAT12 (fully functional), FAT16 (WIP), and FAT32 (WIP) bootloaders
+- **Multi-filesystem support**: FAT12 (fully functional), FAT16 (WIP - incomplete), and FAT32 (WIP - incomplete) bootloaders
 - **Three-stage boot process**:
-  - **Stage 1** (boot12/16/32.asm): MBR bootloader (512 bytes)
-  - **Stage 1.5** (fat12/16/32.asm): Filesystem driver (512 bytes)
+  - **Stage 1** (boot12.asm): MBR bootloader (512 bytes) - FAT12 only
+  - **Stage 1** (boot16.asm, boot32.asm): WIP - incomplete MBR bootloaders for FAT16/FAT32
+  - **Stage 1.5** (fat12.asm): Filesystem driver (512 bytes) - FAT12 only
+  - **Stage 1.5** (fat16.asm, fat32.asm): WIP - incomplete filesystem drivers for FAT16/FAT32
   - **Stage 2** (boot2.asm): 64-bit transition and kernel loader
 - **Track boundary handling**: Proper BIOS INT 0x13 disk reads respecting track boundaries
 - **A20 line enabling**: Required for accessing memory above 1MB
@@ -17,20 +19,19 @@ A complete x86_64 operating system with multi-stage bootloader, FAT12 filesystem
 - **64-bit long mode**: Full x86_64 support
 - **Hardware drivers**:
   - VGA text mode display
-  - PS/2 keyboard input
-  - PIT timer (1ms resolution)
-  - FDC (Floppy Disk Controller) with DMA support
-  - ATA/IDE disk controller (with timeout handling) (WIP)
+  - PS/2 keyboard input with IRQ1 handler
+  - PIT timer (1ms resolution) with IRQ0 handler
+  - FDC (Floppy Disk Controller) with IRQ6-driven DMA transfers
+  - ATA/IDE disk controller (with timeout handling) (WIP - incomplete)
 - **Filesystem drivers**:
   - FAT12 (floppy disks) - fully functional with FDC
-  - FAT16 (small partitions) (WIP)
-  - FAT32 (large partitions) (WIP)
+  - FAT16 (small partitions) (WIP - incomplete, kernel driver only, no bootloader)
+  - FAT32 (large partitions) (WIP - incomplete, kernel driver only, no bootloader)
 - **DMA Controller**: 8237 DMA setup for floppy disk transfers
 - **Interrupt handling**: IDT setup with hardware interrupt support
 - **Memory management**:
   - Physical memory manager (bitmap allocator) with E820 detection
   - Virtual memory manager (paging) with dynamic mapping up to 1GB
-  - Kernel heap (malloc/free/realloc/calloc)
 - **System call interface**: INT 0x80 for kernel-userspace communication
 - **ELF Program loader**: Loads and executes 64-bit ELF programs from FAT12 filesystem
   - Parses ELF headers and program segments
@@ -108,16 +109,21 @@ make debug
 2. Attach `disk.img` as floppy disk
 3. Boot!
 
+### Bochs
+1. Ensure `bochsrc.bxrc` is configured (NOT included in repository - create it manually)
+2. Run: `bochs -f bochsrc.bxrc`
+3. Press Enter at the configuration prompt
+
 ## Project Structure
 
 ```
 bootloader/
-├── boot12.asm          # FAT12 MBR bootloader
-├── boot16.asm          # FAT16 MBR bootloader (WIP)
-├── boot32.asm          # FAT32 MBR bootloader (WIP)
-├── fat12.asm           # FAT12 filesystem driver (stage 1.5)
-├── fat16.asm           # FAT16 filesystem driver (stage 1.5) (WIP)
-├── fat32.asm           # FAT32 filesystem driver (stage 1.5) (WIP)
+├── boot12.asm          # FAT12 MBR bootloader (fully functional)
+├── boot16.asm          # FAT16 MBR bootloader (WIP - incomplete)
+├── boot32.asm          # FAT32 MBR bootloader (WIP - incomplete)
+├── fat12.asm           # FAT12 filesystem driver (stage 1.5, fully functional)
+├── fat16.asm           # FAT16 filesystem driver (stage 1.5) (WIP - incomplete)
+├── fat32.asm           # FAT32 filesystem driver (stage 1.5) (WIP - incomplete)
 ├── boot2.asm           # Second stage: 64-bit transition
 ├── kernel.c            # Kernel entry point
 ├── start.asm           # Kernel assembly entry
@@ -140,7 +146,7 @@ bootloader/
 │   └── ...
 ├── src/                # Kernel source files
 │   ├── fat12.c
-│   ├── fdc.c          # FDC with DMA support
+│   ├── fdc.c          # FDC with IRQ-driven DMA transfers
 │   ├── keyboard.c
 │   ├── timer.c
 │   ├── idt.c
@@ -284,9 +290,10 @@ All filesystem drivers support:
 - **dd** (disk image creation)
 
 ### Testing
-- **QEMU** (qemu-system-x86_64)
-- **GDB** (optional, for debugging)
-- **VirtualBox** (optional, alternative to QEMU) (WIP) (Doesn't actually run yet and idk why.)
+- **QEMU** (qemu-system-x86_64) - fully supported
+- **VirtualBox** - fully supported
+- **Bochs** - fully supported (requires bochsrc.bxrc configuration)
+- **GDB** (optional, for debugging with QEMU)
 
 ## Development Notes
 
@@ -302,13 +309,16 @@ read_count = min(sectors_left_on_track, sectors_remaining)
 ```
 
 ### Floppy Disk Controller (FDC) & DMA
-The kernel includes a full FDC driver with DMA support:
+The kernel includes a full FDC driver with IRQ-driven DMA support:
+- **IRQ6 Handler**: Interrupt-driven operation instead of polling/delays
 - **DMA Channel 2**: Used for floppy disk transfers
-- **DMA Buffer**: Located at 0x8000 (safe memory, doesn't conflict with page tables)
+- **DMA Buffer**: Located at 0x20000 (safe memory in old kernel ELF area)
 - **Transfer Mode**: Single-transfer mode, 512 bytes per sector
-- **Commands**: Reset, recalibrate, seek, read data
+- **Commands**: Reset, recalibrate, seek, read data, write data
 - **Result Handling**: Reads 7-byte result after each operation
 - **Motor Control**: Automatic motor on/off for power management
+- **Synchronization**: Uses `sti; hlt` pattern to work from syscall context
+- **Spurious IRQ7 Handler**: Prevents triple faults from 8259A PIC spurious interrupts
 
 **Critical Memory Layout:**
 - 0x1000-0x3FFF: Page tables (PML4, PDPT, PD) - **DO NOT USE**
@@ -331,8 +341,15 @@ The kernel is compiled as an ELF64 executable. Boot2.asm:
 
 This project is provided as-is for educational purposes.
 
+## Emulator Compatibility
+
+SantOS has been tested and runs successfully on:
+- **QEMU** (qemu-system-x86_64) - Primary development platform
+- **VirtualBox** - Fully functional with minor visual quirks (status bar flashing in SEdit, minor screen flashing while typing)
+- **Bochs** - Fully functional with proper configuration (bochsrc.bxrc NOT included in repository - create it manually)
+
 ## Notes
 
-***__It is not recommended to use this as a production bootloader. All code provided is untested in a real system and may contain bugs that could cause data loss or system instability. For example, I have only been able to get it to successfully run in QEMU, not in VirtualBox. Use at your own risk.__***
+***__It is not recommended to use this as a production bootloader. All code provided is untested in a real system and may contain bugs that could cause data loss or system instability. Use at your own risk.__***
 
 Feel free to fork and modify for your own projects. If you feel you have a significant improvement, consider contributing back to the project and explain in thorough detail what you have done and why so that I can learn from your improvements!
