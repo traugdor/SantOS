@@ -79,6 +79,14 @@ chmod +x build.sh create_disk.sh
 ./create_disk.sh
 ```
 
+### Quick Scripts
+```bash
+quick.sh   -- Builds everything and creates disk image
+quick_b.sh -- Builds bootloader only
+quick_k.sh -- Builds kernel only
+quick_r.sh -- Runs in QEMU
+```
+
 This creates a 1.44MB FAT12 floppy disk image (`disk.img`) with:
 - Bootloader in MBR
 - FAT12.SYS filesystem driver
