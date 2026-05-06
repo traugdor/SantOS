@@ -65,20 +65,18 @@ reset_disk:
     
     ; Calculate data area start
     ; data_start = reserved + (FATs * sectors_per_FAT)
-    mov bx, word [0x7C0E]       ; Reserved sectors
-    mov cx, word [0x7C24]       ; Sectors per FAT (use low word)
-    mov dl, byte [0x7C10]       ; Number of FATs
     push ax
-    mov al, dl
-    mul cx                      ; AX = FATs * sectors_per_FAT (low word)
+    mov bx, word [0x7C0E]       ; BX = Reserved sectors
+    movzx ax, byte [0x7C10]     ; AX = num_FATs (AH=0)
+    mul word [0x7C24]            ; DX:AX = num_FATs * sectors_per_FAT
     add bx, ax                  ; BX = data area start LBA
     pop ax
     
     ; Convert cluster to LBA
     ; LBA = data_start + (cluster - 2) * sectors_per_cluster
     sub ax, 2                   ; Cluster 2 is first data cluster
-    mov cl, byte [0x7C0D]       ; Sectors per cluster
-    mul cl                      ; AX = cluster offset in sectors
+    movzx cx, byte [0x7C0D]     ; CX = sectors per cluster
+    mul cx                      ; DX:AX = cluster offset in sectors
     add ax, bx                  ; AX = LBA of root directory
     
     ; Load root directory to 0x0800:0x0000
@@ -141,19 +139,17 @@ reset_disk:
     ; Ignore high cluster word - assume cluster < 65536
     
     ; Calculate data area start (same as before)
-    mov bx, word [0x7C0E]       ; Reserved sectors
-    mov cx, word [0x7C24]       ; Sectors per FAT (low word)
-    mov dl, byte [0x7C10]       ; Number of FATs
     push ax
-    mov al, dl
-    mul cx
+    mov bx, word [0x7C0E]       ; BX = Reserved sectors
+    movzx ax, byte [0x7C10]     ; AX = num_FATs (AH=0)
+    mul word [0x7C24]            ; DX:AX = num_FATs * sectors_per_FAT
     add bx, ax                  ; BX = data area start LBA
     pop ax
     
     ; Convert cluster to LBA
     sub ax, 2
-    mov cl, byte [0x7C0D]       ; Sectors per cluster
-    mul cl
+    movzx cx, byte [0x7C0D]     ; CX = sectors per cluster
+    mul cx                       ; DX:AX = cluster offset in sectors
     add ax, bx                  ; AX = LBA
     
     ; Convert LBA to CHS

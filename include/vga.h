@@ -27,6 +27,7 @@
 
 // VGA functions
 void vga_init(void);
+void vga_disable_blink(void);
 void vga_clear(void);
 void vga_putchar(char c);
 void vga_write(const char* str);
@@ -36,5 +37,6 @@ void vga_update_cursor(void);
 void vga_enable_cursor(uint8_t start, uint8_t end);
 void vga_disable_cursor(void);
 void vga_set_cursor_pos(uint8_t x, uint8_t y);
+void vga_putchar_at(uint8_t x, uint8_t y, char c, uint8_t color);
 
 #endif

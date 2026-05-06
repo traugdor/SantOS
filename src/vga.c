@@ -26,10 +26,26 @@ static inline uint16_t vga_entry(char c, uint8_t color) {
     return (uint16_t)c | ((uint16_t)color << 8);
 }
 
+// Disable VGA character blink so bit 7 of the attribute byte becomes
+// background-intensity instead of blink.  Without this, any attribute byte
+// with bit 7 set (e.g. white-background 0xF0) causes the character to
+// blink at the hardware level — which is why the status bar disappeared
+// on every cursor-blink cycle.
+void vga_disable_blink(void) {
+    inb(0x3DA);           // reset attribute controller flip-flop to address mode
+    outb(0x3C0, 0x30);    // select register 0x10 with PAS=1 (keep display enabled)
+    uint8_t mode = inb(0x3C1);
+    mode &= ~(1 << 3);    // clear bit 3: Blink Enable → Background Intensity
+    inb(0x3DA);           // reset flip-flop again before writing data
+    outb(0x3C0, 0x30);    // re-select register 0x10
+    outb(0x3C0, mode);    // write modified value
+}
+
 void vga_init(void) {
     cursor_x = 0;
     cursor_y = 0;
     current_color = 0x0F;
+    vga_disable_blink();
     vga_clear();
     vga_enable_cursor(0, 15);  // Standard cursor (full height)
     vga_update_cursor();
@@ -144,4 +160,9 @@ void vga_set_cursor_pos(uint8_t x, uint8_t y) {
     cursor_x = x;
     cursor_y = y;
     vga_update_cursor();
+}
+
+void vga_putchar_at(uint8_t x, uint8_t y, char c, uint8_t color) {
+    if (x >= VGA_WIDTH || y >= VGA_HEIGHT) return;
+    vga_buffer[y * VGA_WIDTH + x] = vga_entry(c, color);
 }

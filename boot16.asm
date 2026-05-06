@@ -61,16 +61,11 @@ reset_disk:
 ; For typical FAT16: Reserved + (FATs * FAT_size) = root dir start
 
     ; Read BPB to get filesystem parameters
-    mov ax, word [0x7C0E]   ; Reserved sectors
-    mov bx, word [0x7C16]   ; Sectors per FAT
-    mov cl, byte [0x7C10]   ; Number of FATs
-    
     ; Calculate root directory LBA: reserved + (FATs * sectors_per_FAT)
-    push ax
-    mov al, cl
-    mul bx                  ; AX = FATs * sectors_per_FAT
-    pop bx
-    add ax, bx              ; AX = root directory LBA
+    mov bx, word [0x7C0E]   ; BX = Reserved sectors
+    movzx ax, byte [0x7C10] ; AX = num_FATs (AH=0)
+    mul word [0x7C16]        ; DX:AX = num_FATs * sectors_per_FAT
+    add ax, bx               ; AX = root directory LBA
     
     ; Load root directory to 0x0800:0x0000
     mov bx, 0x0800
@@ -131,11 +126,10 @@ reset_disk:
     
     ; Calculate data area start
     ; data_start = reserved + (FATs * sectors_per_FAT) + root_dir_sectors
-    mov bx, word [0x7C0E]   ; Reserved sectors
-    push ax
-    mov ax, word [0x7C16]   ; Sectors per FAT
-    mov cl, byte [0x7C10]   ; Number of FATs
-    mul cl
+    mov bx, word [0x7C0E]   ; BX = Reserved sectors
+    push ax                  ; save cluster
+    movzx ax, byte [0x7C10] ; AX = num_FATs (AH=0)
+    mul word [0x7C16]        ; DX:AX = num_FATs * sectors_per_FAT
     add bx, ax              ; BX = reserved + FAT area
     
     ; Add root directory sectors
@@ -148,8 +142,8 @@ reset_disk:
     
     pop ax                  ; Restore cluster number
     sub ax, 2               ; Cluster 2 is first data cluster
-    mov cl, byte [0x7C0D]   ; Sectors per cluster
-    mul cl                  ; AX = cluster offset in sectors
+    movzx cx, byte [0x7C0D] ; CX = sectors per cluster
+    mul cx                  ; DX:AX = cluster offset in sectors
     add ax, bx              ; AX = LBA of cluster
     
     ; Convert LBA to CHS

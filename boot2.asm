@@ -484,15 +484,6 @@ print_hex:
     pop rax
     ret
 
-; Delay for 64-bit mode
-delay_64:
-    push rcx
-.loop:
-    dec rcx
-    jnz .loop
-    pop rcx
-    ret
-
 ; Load kernel from disk and parse ELF
 load_kernel:
     ; Debug: Show we entered load_kernel

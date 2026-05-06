@@ -58,7 +58,13 @@ void kernel_main(void) {
                 pmem_size = 0x40000000;
             }
             
-            pmem_init((uint32_t)pmem_start, (uint32_t)pmem_size);
+            // PMM is 32-bit; reject regions above 4GB to prevent truncation
+            if (pmem_start > 0xFFFFFFFF || pmem_size > 0xFFFFFFFF) {
+                printf("WARNING: Memory region above 4GB, using fallback\n");
+                pmem_init(0x400000, 0x400000);
+            } else {
+                pmem_init((uint32_t)pmem_start, (uint32_t)pmem_size);
+            }
         } else {
             pmem_init(0x400000, 0x400000);
         }
@@ -133,7 +139,7 @@ void kernel_main(void) {
     void* shell_addr = (void*)0x100000;  // Load at 1MB
     uint64_t entry_point = load_program("SHELL.ELF", shell_addr);
     if (entry_point != 0) {
-        execute_program(entry_point, "SHELL.ELF", 1);  // kernel_mode=1 (halt on exit)
+        execute_program(entry_point, "SHELL.ELF", 0);  // kernel_mode=0 (return to kernel on exit)
     } else {
         printf("Failed to load shell. Halting.\n");
         __asm__ volatile("1: hlt; jmp 1b");

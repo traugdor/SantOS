@@ -57,6 +57,11 @@ static uint16_t get_fat_entry(uint16_t cluster) {
     uint32_t fat_offset = cluster + (cluster / 2); // cluster * 1.5
     uint16_t entry;
     
+    // Bounds check: need 2 bytes starting at fat_offset
+    if (fat_offset + 1 >= sizeof(fat_buffer)) {
+        return 0x0FF7; // Return bad cluster marker on OOB
+    }
+    
     // Read the 16-bit value containing our 12-bit entry
     entry = *(uint16_t*)&fat_buffer[fat_offset];
     

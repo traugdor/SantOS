@@ -40,12 +40,13 @@ static void print_signed(int num, void (*putc)(char, void*), void* ctx) {
     
     if (num < 0) {
         is_negative = 1;
-        num = -num;
     }
     
-    while (num > 0) {
-        buffer[i++] = digits[num % 10];
-        num /= 10;
+    // Use unsigned to avoid UB when num == INT_MIN
+    unsigned int unum = is_negative ? (unsigned int)(-(num + 1)) + 1u : (unsigned int)num;
+    while (unum > 0) {
+        buffer[i++] = digits[unum % 10];
+        unum /= 10;
     }
     
     if (is_negative) {

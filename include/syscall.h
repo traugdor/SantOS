@@ -11,6 +11,7 @@
 #define SYSCALL_CLEAR     3
 #define SYSCALL_SET_COLOR 4
 #define SYSCALL_SET_CURSOR 5
+#define SYSCALL_PUTCHAR_AT 6
 
 // System call numbers - Memory
 #define SYSCALL_MALLOC   10

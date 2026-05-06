@@ -75,7 +75,14 @@ uint64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2, uin
             vga_set_cursor_pos((uint8_t)arg1, (uint8_t)arg2);  // x, y
             result = 0;
             break;
-        
+
+        case SYSCALL_PUTCHAR_AT:
+            // arg1=x, arg2=y, arg3=((color<<8)|c)  — no hardware cursor update
+            vga_putchar_at((uint8_t)arg1, (uint8_t)arg2,
+                           (char)(arg3 & 0xFF), (uint8_t)(arg3 >> 8));
+            result = 0;
+            break;
+
         // Memory syscalls
         case SYSCALL_MALLOC:
             result = (uint64_t)malloc((size_t)arg1);

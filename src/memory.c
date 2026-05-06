@@ -196,29 +196,39 @@ uint32_t pmem_alloc_pages(uint32_t count) {
         return 0;
     }
     
-    // Find first free page
-    uint32_t start_page = find_free_page(0);
-    if (start_page == 0xFFFFFFFF) {
-        printf("ERROR: No free pages found!\n");
-        return 0;
-    }
-    
-    // Check if we have 'count' contiguous free pages
-    for (uint32_t i = 0; i < count; i++) {
-        if (bitmap_is_set(start_page + i)) {
-            // Not contiguous, try again from next page
-            return pmem_alloc_pages(count);
+    // Iteratively search for 'count' contiguous free pages
+    uint32_t search_start = 0;
+    while (search_start + count <= pmem.total_pages) {
+        uint32_t start_page = find_free_page(search_start);
+        if (start_page == 0xFFFFFFFF || start_page + count > pmem.total_pages) {
+            printf("ERROR: No contiguous free pages found!\n");
+            return 0;
+        }
+        
+        // Check if we have 'count' contiguous free pages
+        uint32_t contiguous = 1;
+        uint32_t i;
+        for (i = 1; i < count; i++) {
+            if (bitmap_is_set(start_page + i)) {
+                // Not contiguous, skip past the used page
+                search_start = start_page + i + 1;
+                contiguous = 0;
+                break;
+            }
+        }
+        
+        if (contiguous) {
+            // Mark all pages as used
+            for (uint32_t j = 0; j < count; j++) {
+                bitmap_set(start_page + j);
+            }
+            pmem.free_pages -= count;
+            return (start_page * 4096);
         }
     }
     
-    // Mark all pages as used
-    for (uint32_t i = 0; i < count; i++) {
-        bitmap_set(start_page + i);
-    }
-    
-    pmem.free_pages -= count;
-    
-    return (start_page * 4096);
+    printf("ERROR: No contiguous free pages found!\n");
+    return 0;
 }
 
 // Free a single physical page

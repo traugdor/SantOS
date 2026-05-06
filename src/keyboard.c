@@ -164,7 +164,7 @@ int keyboard_available(void) {
 char keyboard_getchar(void) {
     // Wait for a key
     while (!keyboard_available()) {
-        __asm__ volatile("hlt");
+        __asm__ volatile("sti; hlt");
     }
     
     // Read from buffer

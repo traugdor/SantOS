@@ -190,6 +190,14 @@ void* realloc(void* ptr, size_t size) {
 
 // Allocate and zero-initialize memory
 void* calloc(size_t nmemb, size_t size) {
+    // Check for multiplication overflow
+    if (nmemb != 0 && size != 0) {
+        size_t total_check = nmemb * size;
+        if (total_check / nmemb != size) {
+            return NULL;  // Overflow
+        }
+    }
+    
     size_t total_size = nmemb * size;
     
     void* ptr = malloc(total_size);

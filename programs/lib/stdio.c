@@ -43,6 +43,12 @@ void set_cursor_pos(unsigned char x, unsigned char y) {
     do_syscall(SYSCALL_SET_CURSOR, (uint64_t)x, (uint64_t)y, 0);
 }
 
+void putchar_at(unsigned char x, unsigned char y, int c, unsigned char fg, unsigned char bg) {
+    uint64_t color = (uint64_t)((bg << 4) | (fg & 0x0F));
+    uint64_t packed = (color << 8) | (uint64_t)(unsigned char)c;
+    do_syscall(SYSCALL_PUTCHAR_AT, (uint64_t)x, (uint64_t)y, packed);
+}
+
 int list_dir(void) {
     return (int)do_syscall(SYSCALL_LIST_DIR, 0, 0, 0);
 }
@@ -162,7 +168,8 @@ static void print_uint(uint64_t val, int base) {
 static void print_int(int64_t val) {
     if (val < 0) {
         putchar('-');
-        print_uint((uint64_t)(-val), 10);
+        // Avoid UB when val == INT64_MIN: -(MIN+1)+1 is safe in unsigned
+        print_uint((uint64_t)(-(val + 1)) + 1u, 10);
     } else {
         print_uint((uint64_t)val, 10);
     }
@@ -275,7 +282,8 @@ static void buf_print_uint(char** buf, uint64_t val, int base) {
 static void buf_print_int(char** buf, int64_t val) {
     if (val < 0) {
         buf_putchar(buf, '-');
-        buf_print_uint(buf, (uint64_t)(-val), 10);
+        // Avoid UB when val == INT64_MIN
+        buf_print_uint(buf, (uint64_t)(-(val + 1)) + 1u, 10);
     } else {
         buf_print_uint(buf, (uint64_t)val, 10);
     }

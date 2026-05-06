@@ -64,34 +64,29 @@ search_boot2_bin:
     
     ; Calculate data area start (same as boot16.asm)
     push bx
-    mov bx, word [0x7C0E]   ; Reserved sectors
+    mov bx, word [0x7C0E]   ; BX = Reserved sectors
     push ax
-    mov ax, word [0x7C16]   ; Sectors per FAT
-    mov cl, byte [0x7C10]   ; Number of FATs
-    mul cl
+    movzx ax, byte [0x7C10] ; AX = num_FATs (AH=0)
+    mul word [0x7C16]        ; DX:AX = num_FATs * sectors_per_FAT
     add bx, ax              ; BX = reserved + FAT area
     
     ; Add root directory sectors
     mov ax, word [0x7C11]   ; Root entry count
     shl ax, 5               ; * 32 bytes per entry
-    push dx
-    mov dx, word [0x7C0B]   ; Bytes per sector
-    push cx
-    xor cx, cx
-    div dx                  ; AX = root dir sectors
-    pop cx
-    pop dx
+    xor dx, dx
+    mov cx, word [0x7C0B]   ; CX = bytes per sector
+    div cx                  ; AX = root dir sectors
     add bx, ax              ; BX = data area start LBA
-    
+
     pop ax                  ; Restore file size
     pop ax                  ; Restore cluster number
     
     ; Convert cluster to LBA
     sub ax, 2               ; Cluster 2 is first data cluster
-    mov cl, byte [0x7C0D]   ; Sectors per cluster
-    mul cl                  ; AX = cluster offset in sectors
+    movzx cx, byte [0x7C0D] ; CX = sectors per cluster
+    mul cx                  ; DX:AX = cluster offset in sectors
     add ax, bx              ; AX = LBA of cluster
-    
+
     ; Convert LBA to CHS
     xor  dx, dx
     push bx
@@ -180,13 +175,10 @@ search_kernel_elf:
     
     ; Calculate data area start (same calculation as boot2)
     push bx
-    mov bx, word [0x7C0E]   ; Reserved sectors
+    mov bx, word [0x7C0E]   ; BX = Reserved sectors
     push ax
-    mov ax, word [0x7C16]   ; Sectors per FAT
-    push cx
-    mov cl, byte [0x7C10]   ; Number of FATs
-    mul cl
-    pop cx
+    movzx ax, byte [0x7C10] ; AX = num_FATs (AH=0)
+    mul word [0x7C16]        ; DX:AX = num_FATs * sectors_per_FAT
     add bx, ax              ; BX = reserved + FAT area
     
     ; Add root directory sectors
@@ -207,8 +199,8 @@ search_kernel_elf:
     ; Convert cluster to LBA
     sub ax, 2               ; Cluster 2 is first data cluster
     push cx
-    mov cl, byte [0x7C0D]   ; Sectors per cluster
-    mul cl                  ; AX = cluster offset in sectors
+    movzx cx, byte [0x7C0D] ; CX = sectors per cluster
+    mul cx                  ; DX:AX = cluster offset in sectors
     pop cx
     add ax, bx              ; AX = LBA of cluster
     mov si, ax              ; SI = starting LBA

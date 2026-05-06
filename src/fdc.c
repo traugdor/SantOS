@@ -335,11 +335,13 @@ int fdc_read_sectors(uint32_t lba, uint8_t count, uint8_t* buffer) {
         if (fdc_wait_irq() != 0) { fdc_motor_off(); return -1; }
         
         uint8_t st0, st1, st2, r[4];
-        if (fdc_read_byte(&st0) | fdc_read_byte(&st1) | fdc_read_byte(&st2) |
-            fdc_read_byte(&r[0]) | fdc_read_byte(&r[1]) | fdc_read_byte(&r[2]) | fdc_read_byte(&r[3])) {
-            fdc_motor_off();
-            return -1;
-        }
+        if (fdc_read_byte(&st0) != 0) { fdc_motor_off(); return -1; }
+        if (fdc_read_byte(&st1) != 0) { fdc_motor_off(); return -1; }
+        if (fdc_read_byte(&st2) != 0) { fdc_motor_off(); return -1; }
+        if (fdc_read_byte(&r[0]) != 0) { fdc_motor_off(); return -1; }
+        if (fdc_read_byte(&r[1]) != 0) { fdc_motor_off(); return -1; }
+        if (fdc_read_byte(&r[2]) != 0) { fdc_motor_off(); return -1; }
+        if (fdc_read_byte(&r[3]) != 0) { fdc_motor_off(); return -1; }
         
         if (st0 & 0xC0) { fdc_motor_off(); return -1; }
         

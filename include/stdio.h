@@ -19,6 +19,7 @@ int scanf(const char* format, ...);         // Formatted input
 // Character output
 int putchar(int c);                         // Write single character
 int puts(const char* str);                  // Write string with newline
+void putchar_at(unsigned char x, unsigned char y, int c, unsigned char fg, unsigned char bg);  // Write char at position without moving cursor
 
 // Screen control
 void clear_screen(void);                    // Clear the screen

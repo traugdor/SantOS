@@ -64,23 +64,19 @@ search_boot2_bin:
     ; Ignore high cluster word - assume cluster < 65536
     
     ; Calculate data area start
-    push bx                     ; Save cluster
-    mov bx, word [0x7C0E]       ; Reserved sectors
-    mov cx, word [0x7C24]       ; Sectors per FAT (low word)
-    mov dl, byte [0x7C10]       ; Number of FATs
-    push ax
-    mov al, dl
-    mul cx
+    push bx                     ; Save cluster (will become AX below)
+    mov bx, word [0x7C0E]       ; BX = Reserved sectors
+    movzx ax, byte [0x7C10]     ; AX = num_FATs (AH=0)
+    mul word [0x7C24]            ; DX:AX = num_FATs * sectors_per_FAT
     add bx, ax                  ; BX = data area start LBA
-    pop ax
     pop ax                      ; Restore cluster to AX
     
     ; Convert cluster to LBA
     sub ax, 2
-    mov cl, byte [0x7C0D]       ; Sectors per cluster
-    mul cl
+    movzx cx, byte [0x7C0D]     ; CX = sectors per cluster
+    mul cx                       ; DX:AX = cluster offset in sectors
     add ax, bx                  ; AX = LBA
-    
+
     ; Convert LBA to CHS
     xor dx, dx
     push bx
@@ -89,7 +85,7 @@ search_boot2_bin:
     pop bx
     mov cx, dx
     inc cx                      ; Sector
-    
+
     cwd
     push bx
     mov bx, 2                   ; Number of heads
@@ -102,7 +98,7 @@ search_boot2_bin:
 
     push es
     push ds
-    
+
     ; Read BOOT2.BIN
     mov ax, 0x0900
     mov es, ax
@@ -173,20 +169,16 @@ search_kernel_elf:
     ; Calculate data area start
     push cx                 ; Save sector count
     push ax                 ; Save cluster
-    mov bx, word [0x7C0E]   ; Reserved sectors
-    mov cx, word [0x7C24]   ; Sectors per FAT (low word)
-    mov dl, byte [0x7C10]   ; Number of FATs
-    push ax
-    mov al, dl
-    mul cx
+    mov bx, word [0x7C0E]   ; BX = Reserved sectors
+    movzx ax, byte [0x7C10] ; AX = num_FATs (AH=0)
+    mul word [0x7C24]        ; DX:AX = num_FATs * sectors_per_FAT
     add bx, ax              ; BX = data area start LBA
-    pop ax
     pop ax                  ; Restore cluster
-    
+
     ; Convert cluster to LBA
     sub ax, 2
-    mov cl, byte [0x7C0D]   ; Sectors per cluster
-    mul cl
+    movzx cx, byte [0x7C0D] ; CX = sectors per cluster
+    mul cx                   ; DX:AX = cluster offset in sectors
     add ax, bx              ; AX = LBA
     mov si, ax              ; SI = starting LBA
     pop cx                  ; CX = total sectors to read
